@@ -871,10 +871,15 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           // 工作目录随会话注入到每条工具调用的 ctx，WorkspaceBackend 优先使用 ctx.workspaceRoot，
           // 实现多窗口/多会话并发时各自操作各自的目录、互不干扰。
           workspaceRoot: workspaceDir || null,
-          // 把**本侧栏所在的 chrome 窗口**注入 ctx.win——所有定位标签页的工具(page_eval/导航/点击/
-          // webapi/jsvmp trace/signer_trace/whitebox)优先打**本窗口**的当前 tab，而非"全局聚焦窗口"，
-          // 两个浏览器窗口并发跑各自的 Agent 时互不打错 tab。topChromeWindow 不随焦点变。
-          win: (typeof window !== "undefined" && window.browsingContext && window.browsingContext.topChromeWindow) || null,
+          // Runtime 只接收不透明 hostContext；Firefox Host 再将它适配为 backend 的 ctx.win。
+          // topChromeWindow 不随焦点变化，两个窗口并发时不会把工具打到另一个窗口。
+          hostContext: {
+            win:
+              (typeof window !== "undefined" &&
+                window.browsingContext &&
+                window.browsingContext.topChromeWindow) ||
+              null,
+          },
         }).catch(e => setError((e && e.message) || String(e)));
       } else {
         // 无 session 兜底（不跨重载）：直接 chat。

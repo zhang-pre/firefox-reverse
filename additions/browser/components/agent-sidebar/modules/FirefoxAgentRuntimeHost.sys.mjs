@@ -36,18 +36,69 @@ function onShutdown(callback) {
   };
 }
 
+const clock = Object.freeze({
+  now: () => Date.now(),
+  setTimeout: timers.setTimeout,
+  clearTimeout: timers.clearTimeout,
+});
+
+const llmTransport = Object.freeze({
+  fetch: (...args) => globalThis.fetch(...args),
+  createAbortController: () => new AbortController(),
+  setTimeout: timers.setTimeout,
+  clearTimeout: timers.clearTimeout,
+});
+
+function createToolContext({
+  workspaceRoot = null,
+  hostContext = null,
+  signal = null,
+} = {}) {
+  return {
+    workspaceRoot,
+    win:
+      hostContext && typeof hostContext === "object"
+        ? hostContext.win || null
+        : null,
+    signal,
+  };
+}
+
+const lifecycle = Object.freeze({ onShutdown });
+const tools = Object.freeze({
+  getRouter: router,
+  getBackends,
+  createContext: createToolContext,
+});
+
+export function createFirefoxAgentRuntimePorts({
+  config,
+  conversations,
+  createClient,
+  isVisionModel,
+} = {}) {
+  return {
+    clock,
+    config,
+    conversations,
+    llm: {
+      transport: llmTransport,
+      createClient,
+      isVisionModel,
+    },
+    tools,
+    lifecycle,
+  };
+}
+
 export const firefoxAgentRuntimeHost = Object.freeze({
-  timers: Object.freeze({
-    setTimeout: timers.setTimeout,
-    clearTimeout: timers.clearTimeout,
-  }),
+  clock,
+  lifecycle,
+  tools,
+  timers: clock,
   router,
   backends: getBackends,
   onShutdown,
-  llmTransport: Object.freeze({
-    fetch: (...args) => globalThis.fetch(...args),
-    createAbortController: () => new AbortController(),
-    setTimeout: timers.setTimeout,
-    clearTimeout: timers.clearTimeout,
-  }),
+  createToolContext,
+  llmTransport,
 });

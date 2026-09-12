@@ -22,6 +22,8 @@ run npm --prefix "$SIDEBAR_DIR" run build
 SELFTESTS=(
   selftest-addons.mjs
   selftest-agent-runtime-core.mjs
+  selftest-agent-runtime-factory.mjs
+  selftest-agent-turn-orchestrator.mjs
   selftest-config.mjs
   selftest-mozbuild.mjs
   selftest-providers.mjs
@@ -29,6 +31,7 @@ SELFTESTS=(
   selftest-prompt-cache.mjs
   selftest-conversations.mjs
   selftest-ledger-sql.mjs
+  selftest-llm-architecture.mjs
   selftest-context-projection.mjs
   selftest-context-runtime.mjs
   selftest-skills.mjs
