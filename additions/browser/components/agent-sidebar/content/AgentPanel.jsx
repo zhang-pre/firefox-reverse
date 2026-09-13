@@ -49,7 +49,7 @@ const SYSTEM = `你是 firefox-reverse 浏览器内置的 JS 逆向与自动化�
 - 给结论用「## 结论」作小标题，简洁直接；别用"实事求是的结论"之类套话/口头禅。`;
 
 // 模式注入块：每条发送时按本会话模式拼到系统提示尾部。
-// 全自动=一条龙跑到底（现状默认）；AI辅助=逐阶段停下跟用户讨论选方向。
+// 全自动=一条龙；AI辅助=用户阶段决策；双模型领航=Worker 执行、Director 阶段审阅。
 const AUTO_BLOCK = `
 
 【执行模式：全自动】给定目标接口/参数，你**一条龙**自主推进到底（P0 侦察→P1 定位→P2 验证→P3 判型→P4 选策略→P5 补环境→P6 实打验证），不中途停下问我；只有真正需要我提供你拿不到的东西（登录态/账号/验证码/纯业务决策），或任务全部完成（给出可独立实跑、与页面真值对上的产物）时才停。`;
@@ -62,6 +62,24 @@ const ASSIST_BLOCK = `
 3. **只在「真分叉」才停下给选项**：你确实被卡死、或确有几条**实质不同**的路且判不准哪条好——这才给 2-3 个候选方向 + 你的推荐让用户选。**严禁为了结束这一轮、为了跳出反复试的循环，就硬造一个分叉、硬下一个体面的「根因」来收尾。**
 4. **结论必须跟着你自己的证据走、不许自相矛盾**：写「根因/结论」前回看本轮自己的输出——你的日志若显示某步**成功了**，就不能写它「失败」；若是「补一个对象、报错就往后挪一步」，那是在**逼近**、不是「死路」。证据没指向某结论就别下，宁可写「还没定论，下一步具体做 X」然后接着做。
 5. 真拿不准、缺登录态/账号/验证码/纯业务决策，才停下问——辅助模式的价值是**用户帮你导航死路**，不是给你每轮找借口收尾。`;
+
+const SUPERVISED_BLOCK = `
+
+【执行模式：双模型领航·Worker】你负责调查和工具执行；Director 在阶段门审阅并纠偏，最终验收会用 run_node/run_python 重跑 out/ 中的交付文件（每次审阅最多 3 次），失败则交回你修复。
+1. 收到目标后直接用工具完成一个连贯阶段，不要每一步停下，也不要替 Director 编造战略意见。
+2. 到 P1/P2/P4/P6 等高杠杆阶段门、执行上限或最终候选时，停止调用工具并输出一个简短证据块：
+[WORKER_EVIDENCE]
+phase: 当前阶段
+candidate_complete: true|false
+verified_facts: 已由工具验证的事实及对应工具/文件
+rejected_hypotheses: 已否决路线
+artifacts: out/ 中可运行交付文件路径、运行时和参数（例如 run_node file=out/main.js args=["2"]），以及必要依赖
+live_request: 真实接口响应状态与关键结果
+next_step: 若未完成，下一步最小动作
+[/WORKER_EVIDENCE]
+3. 只有已经产出可独立运行脚本、真实接口成功响应且能引用证据时，candidate_complete 才能为 true。普通文字总结不算完成。
+4. Director 的 continue/redirect 决策会作为下一条内部指令返回；严格执行其中的证据要求，然后进入下一个阶段门。
+5. 缺登录态、账号、验证码、权限或不可推断的业务选择时如实列为 blocker，由 Director 决定是否请求用户。`;
 
 // 内联 SVG 图标（stroke=currentColor，随主题/字色变化，比 emoji 清晰可控）
 const svgProps = {
@@ -106,7 +124,7 @@ const ICONS = {
       <path d="M2 2l6 6M8 2l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
-  // 模式图标（与上面同风格 line-SVG）：全自动=闪电(一条龙快)、AI辅助=罗盘(领航/选方向)、未选=开关(挑模式)
+  // 模式图标：全自动=闪电、AI辅助=罗盘、双模型领航=双层盾、未选=开关。
   modeAuto: (
     <svg {...svgProps}>
       <path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z" />
@@ -116,6 +134,12 @@ const ICONS = {
     <svg {...svgProps}>
       <circle cx="12" cy="12" r="9.5" />
       <path d="M15.6 8.4l-2 5.2-5.2 2 2-5.2 5.2-2Z" />
+    </svg>
+  ),
+  modeSupervised: (
+    <svg {...svgProps}>
+      <path d="M12 2.5 20 6v5.5c0 4.8-3.1 8.2-8 10-4.9-1.8-8-5.2-8-10V6l8-3.5Z" />
+      <path d="M9 8.5h6M9 12h6M10.5 15.5h3" />
     </svg>
   ),
   modeUnset: (
@@ -169,6 +193,41 @@ function ThinkSeg({ step, live }) {
   );
 }
 
+const DIRECTOR_ACTION_LABELS = {
+  continue: "继续执行",
+  redirect: "方向修正",
+  finish: "最终通过",
+  ask_user: "请求用户输入",
+};
+
+function DirectorSeg({ step }) {
+  const label =
+    step.status === "reviewing"
+      ? "审阅中"
+      : DIRECTOR_ACTION_LABELS[step.action] || step.action || "已决策";
+  return (
+    <div className={`msg__director is-${step.action || step.status}`}>
+      <div className="msg__director-head">
+        <span>Director · {label}</span>
+        <span className="msg__director-trigger">{step.trigger || "stage_gate"}</span>
+      </div>
+      {step.reason ? <div className="msg__director-reason">{step.reason}</div> : null}
+      {step.guidance ? <div className="msg__director-guide">下一步：{step.guidance}</div> : null}
+      {step.verificationRuns?.map(run => (
+        <details key={run.id} className="msg__director-evidence">
+          <summary>{run.tool} {run.file || "（拒绝执行）"} {(run.args || []).join(" ")} · {run.ok ? "执行成功" : "验收失败"} · exit {run.exitCode ?? "—"}</summary>
+          <pre>{run.id}{"\n"}{run.error || run.output}</pre>
+        </details>
+      ))}
+      {step.requiredEvidence?.length ? (
+        <div className="msg__director-evidence">
+          仍需证据：{step.requiredEvidence.join("；")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // 渲染 steps：正文段/思考段始终显示；工具步骤按 hideTools 折叠。live 时给最后一段加光标。
 function StepList({ steps, hideTools, live }) {
   return steps.map((s, j) => {
@@ -177,6 +236,9 @@ function StepList({ steps, hideTools, live }) {
     }
     if (s.kind === "think") {
       return <ThinkSeg key={j} step={s} live={live && j === steps.length - 1} />;
+    }
+    if (s.kind === "director") {
+      return <DirectorSeg key={j} step={s} />;
     }
     return <TextSeg key={j} step={s} live={live && j === steps.length - 1} />;
   });
@@ -191,16 +253,30 @@ function AssistantBody({ steps, content }) {
   const toolCount = steps.filter(s => s.kind === "tool").length;
   // 最后一段正文（最终结论）的下标
   let lastTextIdx = -1;
+  let lastDirectorIdx = -1;
   for (let i = steps.length - 1; i >= 0; i--) {
-    if (steps[i].kind === "text") {
+    if (lastDirectorIdx < 0 && steps[i].kind === "director") {
+      lastDirectorIdx = i;
+    }
+    if (lastTextIdx < 0 && steps[i].kind === "text") {
       lastTextIdx = i;
+    }
+    if (lastTextIdx >= 0 && lastDirectorIdx >= 0) {
       break;
     }
   }
   // 有「过程」可收起：含工具/思考，或正文不止一段
   const collapsible =
     steps.some(s => s.kind !== "text") || steps.filter(s => s.kind === "text").length > 1;
-  const shown = collapsed ? (lastTextIdx >= 0 ? [steps[lastTextIdx]] : steps.slice(-1)) : steps;
+  const collapsedIndexes = [lastTextIdx, lastDirectorIdx]
+    .filter(index => index >= 0)
+    .filter((index, position, indexes) => indexes.indexOf(index) === position)
+    .sort((a, b) => a - b);
+  const shown = collapsed
+    ? collapsedIndexes.length
+      ? collapsedIndexes.map(index => steps[index])
+      : steps.slice(-1)
+    : steps;
   return (
     <div className="msg__content">
       <StepList steps={shown} hideTools={false} />
@@ -276,7 +352,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
   const [cancellationPending, setCancellationPending] = useState(false);
   const [usage, setUsage] = useState(null);
   const [workspaceDir, setWorkspaceDir] = useState(null); // 当前会话绑定的工作目录
-  const [mode, setMode] = useState(null); // 本会话执行模式："auto"=全自动一条龙 / "assist"=AI辅助逐阶段 / null=未选（首次新建会话让用户选）
+  const [mode, setMode] = useState(null); // auto=全自动 / assist=用户领航 / supervised=双模型领航 / null=未选
   const [files, setFiles] = useState([]); // 工作目录文件列表（展开时填充）
   const [filesOpen, setFilesOpen] = useState(false);
   const listRef = useRef(null);
@@ -839,7 +915,12 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           /* 持久化失败不影响本会话内生效 */
         }
       }
-      sys += effMode === "assist" ? ASSIST_BLOCK : AUTO_BLOCK;
+      sys +=
+        effMode === "assist"
+          ? ASSIST_BLOCK
+          : effMode === "supervised"
+          ? SUPERVISED_BLOCK
+          : AUTO_BLOCK;
       try {
         const dg = notes && notes.digest ? await notes.digest({}) : "";
         if (dg) {
@@ -865,9 +946,9 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         setBusy(true); // → 触发轮询 useEffect 流式刷 UI
         // 引擎在常驻模块跑：切侧栏面板重载也不中断；UI 由轮询驱动(见上面 useEffect)，
         // done/error 由引擎自己落盘，故这里**不 await、不 finalize**。
-        // assist=AI辅助逐阶段：引擎不跨回合自动续（每个 turn 结束交回用户等其选方向）。
+        // assist 交回用户决策；supervised 交给 Director 审阅和最终实跑验收。
         // run() 返回 Promise；同步启动后由常驻 session 自己收尾。catch 防止启动前异常成为未处理 rejection。
-        void session.run(tid, { systemPrompt: sys, dynamicContext: dynamicParts.join("\n\n"), convo, confirmMode, assist: effMode === "assist", maxRounds: 80, maxPerTool: 40,
+        void session.run(tid, { systemPrompt: sys, dynamicContext: dynamicParts.join("\n\n"), convo, confirmMode, assist: effMode === "assist", supervised: effMode === "supervised", maxRounds: 80, maxPerTool: 40,
           // 工作目录随会话注入到每条工具调用的 ctx，WorkspaceBackend 优先使用 ctx.workspaceRoot，
           // 实现多窗口/多会话并发时各自操作各自的目录、互不干扰。
           workspaceRoot: workspaceDir || null,
@@ -882,7 +963,12 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           },
         }).catch(e => setError((e && e.message) || String(e)));
       } else {
-        // 无 session 兜底（不跨重载）：直接 chat。
+        // 无 session 兜底（不跨重载）：只能直接单模型 chat，禁止静默伪装成双模型领航。
+        if (effMode === "supervised") {
+          throw new Error(
+            "双模型领航需要常驻 Agent Runtime 与 ToolRouter；当前页面未完成运行时装配。"
+          );
+        }
         setBusy(true);
         let cancelledBoundary = false;
         try {
@@ -945,7 +1031,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     setError(null);
     setShowHistory(false);
     bindWorkspace(effectiveWorkspace(t));
-    setMode(null); // 新会话未选模式 → 空状态里弹「全自动 / AI辅助」选择卡
+    setMode(null); // 新会话未选模式 → 空状态里弹三种执行策略
     // 清掉上一条会话的「正在跑」实时显示（busy/liveSteps/活动工具/确认）——否则旧会话还在后台跑时
     // 一点新建，新会话会赖着上一个 agent 的实时界面（旧引擎不中断、继续后台跑，切回去即续看）。
     setBusy(false);
@@ -967,9 +1053,11 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
       /* 持久化失败不影响本会话内生效 */
     }
   }
-  // 顶部 chip：手动切换模式（全自动 ⇄ AI辅助），随时可改。
+  // 顶部 chip：三种策略循环切换，按会话持久化。
   function toggleMode() {
-    chooseMode(mode === "assist" ? "auto" : "assist");
+    chooseMode(
+      mode === "auto" ? "assist" : mode === "assist" ? "supervised" : "auto"
+    );
   }
 
   async function openThread(id) {
@@ -1138,16 +1226,32 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
           onClick={toggleMode}
           title={
             mode === "assist"
-              ? "AI辅助模式：逐阶段停下跟你讨论选方向（点击切到全自动）"
+              ? "AI辅助：阶段门交给你决策（点击切到双模型领航）"
+              : mode === "supervised"
+              ? "双模型领航：Worker 执行，Director 审阅并实跑验收（点击切到全自动）"
               : mode === "auto"
-              ? "全自动模式：一条龙跑到底（点击切到AI辅助）"
-              : "点击选择执行模式（全自动 / AI辅助）"
+              ? "全自动：一条龙跑到底（点击切到AI辅助）"
+              : "点击选择执行模式（全自动 / AI辅助 / 双模型领航）"
           }
         >
           <span className="agent-ws__mode-ico" aria-hidden="true">
-            {mode === "assist" ? ICONS.modeAssist : mode === "auto" ? ICONS.modeAuto : ICONS.modeUnset}
+            {mode === "assist"
+              ? ICONS.modeAssist
+              : mode === "supervised"
+              ? ICONS.modeSupervised
+              : mode === "auto"
+              ? ICONS.modeAuto
+              : ICONS.modeUnset}
           </span>
-          <span>{mode === "assist" ? "AI辅助" : mode === "auto" ? "全自动" : "选模式"}</span>
+          <span>
+            {mode === "assist"
+              ? "AI辅助"
+              : mode === "supervised"
+              ? "双模型领航"
+              : mode === "auto"
+              ? "全自动"
+              : "选模式"}
+          </span>
         </button>
         <span
           className="agent-ws__usage"
@@ -1237,6 +1341,10 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
                 <button type="button" className="agent-mode-pick__opt" onClick={() => chooseMode("assist")}>
                   <span className="agent-mode-pick__head"><span className="agent-mode-pick__ico" aria-hidden="true">{ICONS.modeAssist}</span>AI辅助</span>
                   <span className="agent-mode-pick__desc">我先给方案，之后每做完一个阶段（入口定位 / 字节trace / DOM-API trace / 构造实现）就停下汇报、给你方向选项，你来选、逐步推进。</span>
+                </button>
+                <button type="button" className="agent-mode-pick__opt" onClick={() => chooseMode("supervised")}>
+                  <span className="agent-mode-pick__head"><span className="agent-mode-pick__ico" aria-hidden="true">{ICONS.modeSupervised}</span>双模型领航</span>
+                  <span className="agent-mode-pick__desc">Worker 持续执行；Director 在阶段门纠偏，最终最多运行 3 次 out 交付文件，失败则交回 Worker 修复。</span>
                 </button>
                 <div className="agent-mode-pick__hint">选完仍可随时点顶部模式标切换。</div>
               </div>

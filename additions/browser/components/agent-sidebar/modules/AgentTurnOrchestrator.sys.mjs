@@ -7,6 +7,10 @@
 
 import { slimifySteps, textFromSteps } from "./AgentRuntimeCore.sys.mjs";
 import {
+  AgentSupervisor,
+  formatDirectorInstruction,
+} from "./AgentSupervisor.sys.mjs";
+import {
   assertAgentBackendsPort,
   assertAgentRouterPort,
 } from "./AgentRuntimePorts.sys.mjs";
@@ -37,6 +41,7 @@ export class AgentTurnOrchestrator {
     runtimeCore,
     ports,
     runAgentTurn,
+    supervisor = new AgentSupervisor(),
   } = {}) {
     if (!runtimeCore || !ports) {
       throw new TypeError(
@@ -48,6 +53,7 @@ export class AgentTurnOrchestrator {
     this.conversationStore = ports.conversations;
     this.createClient = ports.llm.createClient;
     this.runAgentTurn = requireFunction("runAgentTurn", runAgentTurn);
+    this.supervisor = supervisor;
     this.getRouter = () =>
       assertAgentRouterPort(ports.tools.getRouter());
     this.getBackends = () =>
@@ -70,6 +76,7 @@ export class AgentTurnOrchestrator {
       workspaceRoot,
       hostContext,
       assist = false,
+      supervised = false,
     } = {}
   ) {
     const contextStrategy = this._contextStrategy();
@@ -93,12 +100,18 @@ export class AgentTurnOrchestrator {
       workspaceRoot,
       hostContext,
       assist,
+      supervised,
       abortController: null,
       backends: null,
       client: null,
+      directorClient: null,
       cacheKey: "",
+      directorCacheKey: "",
       vision: false,
       recordUsage: null,
+      objective: "",
+      supervisedToolCalls: [],
+      previousDirectorDecision: null,
       toolContext: null,
     };
 
@@ -142,14 +155,40 @@ export class AgentTurnOrchestrator {
       hostContext: context.hostContext || null,
       signal: context.abortController.signal,
     });
+    const workerProfileId = context.supervised
+      ? this.configStore.getWorkerModelProfileId()
+      : "";
     context.client = this.createClient({
       config: this.configStore,
       transport: this.transport,
+      profileId: workerProfileId || undefined,
+      role: context.supervised ? "worker" : "agent",
     });
-    context.cacheKey = this._cacheKey(context.threadId, context.client);
+    context.cacheKey = this._cacheKey(
+      context.threadId,
+      context.client,
+      workerProfileId,
+      context.supervised ? "worker" : ""
+    );
+    if (context.supervised) {
+      const directorProfileId = this.configStore.getDirectorModelProfileId();
+      context.directorClient = this.createClient({
+        config: this.configStore,
+        transport: this.transport,
+        profileId: directorProfileId || undefined,
+        role: "director",
+      });
+      context.directorCacheKey = this._cacheKey(
+        context.threadId,
+        context.directorClient,
+        directorProfileId,
+        "director"
+      );
+    }
     context.recordUsage = (raw, info = {}) => this._recordUsage(context, raw, info);
-    context.vision = this._detectVision();
+    context.vision = this._detectVision(context.client);
     context.turnMessages = await this._loadTurnMessages(context);
+    context.objective = this._latestUserObjective(context.turnMessages);
   }
 
   async _consumeCancellationBoundary(context) {
@@ -168,7 +207,7 @@ export class AgentTurnOrchestrator {
     }
   }
 
-  _cacheKey(threadId, client) {
+  _cacheKey(threadId, client, profileId = "", role = "") {
     const activeProfile =
       (this.configStore.getActiveModelProfile &&
         this.configStore.getActiveModelProfile()) ||
@@ -176,7 +215,8 @@ export class AgentTurnOrchestrator {
     return [
       "frx-v1",
       threadId,
-      activeProfile?.id || client.providerId || "provider",
+      ...(role ? [role] : []),
+      profileId || activeProfile?.id || client.providerId || "provider",
       client.model || "model",
     ]
       .join(":")
@@ -184,8 +224,9 @@ export class AgentTurnOrchestrator {
       .slice(0, 160);
   }
 
-  _recordUsage(context, raw, info = {}) {
-    const { client, state } = context;
+  _recordUsage(context, raw, info = {}, sourceClient = context.client) {
+    const { state } = context;
+    const client = sourceClient;
     const normalized = normalizeUsage(raw, {
       provider: client.providerId,
       protocol: client.protocol,
@@ -200,24 +241,22 @@ export class AgentTurnOrchestrator {
     this.runtimeCore.notifyThrottled(state);
   }
 
-  _detectVision() {
+  _detectVision(client) {
     try {
-      const active =
-        this.configStore.getActiveModelProfile &&
-        this.configStore.getActiveModelProfile();
-      const provider =
-        (active && active.provider) ||
-        (this.configStore.getActiveProvider &&
-          this.configStore.getActiveProvider());
-      const model =
-        (active && active.model) ||
-        (provider &&
-          this.configStore.getModel &&
-          this.configStore.getModel(provider));
-      return !!this.isVisionModel(model);
+      return !!this.isVisionModel(client?.model || "");
     } catch {
       return false;
     }
+  }
+
+  _latestUserObjective(messages) {
+    for (let index = (messages || []).length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message?.role === "user" && message.content) {
+        return String(message.content).slice(0, 2000);
+      }
+    }
+    return "";
   }
 
   async _loadTurnMessages(context) {
@@ -301,6 +340,9 @@ export class AgentTurnOrchestrator {
   }
 
   async _runUntilTerminal(context) {
+    if (context.supervised) {
+      return this._runSupervised(context);
+    }
     let turnMessages = context.turnMessages;
     let autoRestarts = 0;
     let driftStreak = 0;
@@ -354,7 +396,127 @@ export class AgentTurnOrchestrator {
     }
   }
 
-  _buildLoopOptions(context, messages) {
+  async _runSupervised(context) {
+    let turnMessages = context.turnMessages;
+    let reviewIndex = 0;
+
+    for (;;) {
+      const result = await this.runAgentTurn(
+        this._buildLoopOptions(context, turnMessages, { assist: true })
+      );
+      if (!result || context.abortController.signal.aborted) {
+        return result;
+      }
+
+      context.supervisedToolCalls.push(...(result.toolCalls || []));
+      reviewIndex++;
+      const packet = this.supervisor.buildEvidencePacket({
+        objective: context.objective,
+        result: {
+          ...result,
+          toolCalls: context.supervisedToolCalls,
+        },
+        ledgerDigest: await this._ledgerDigest(context),
+        reviewIndex,
+        previousDecision: context.previousDirectorDecision,
+      });
+
+      this.runtimeCore.applyEvent(context.state, {
+        type: "director_review",
+        reviewIndex,
+        trigger: packet.trigger,
+      });
+      this.runtimeCore.notify(context.state);
+
+      const { decision } = await this.supervisor.review({
+        client: context.directorClient,
+        packet,
+        executeTool: async (name, args) => {
+          if (!context.workspaceRoot) {
+            throw new Error("Director 验收需要当前会话绑定工作目录");
+          }
+          return this.getRouter().dispatch(name, args, context.toolContext);
+        },
+        signal: context.abortController.signal,
+        cacheKey: context.directorCacheKey,
+        onUsage: usage =>
+          this._recordUsage(
+            context,
+            usage,
+            { phase: "director" },
+            context.directorClient
+          ),
+      });
+      context.previousDirectorDecision = decision;
+      this.runtimeCore.applyEvent(context.state, {
+        type: "director_decision",
+        reviewIndex,
+        trigger: packet.trigger,
+        decision,
+      });
+      this.runtimeCore.notify(context.state);
+
+      if (decision.action === "finish" && decision.finalAccepted) {
+        result.content = [
+          result.content,
+          `【Director 最终验收】通过：${decision.reason}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        return result;
+      }
+
+      if (decision.action === "ask_user") {
+        result.content = [
+          result.content,
+          `【Director 请求用户输入】${decision.reason}`,
+          decision.guidance,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        return result;
+      }
+
+      if (reviewIndex >= this.supervisor.maxReviews) {
+        const limitNote =
+          `（已停下）双模型领航已到达 ${this.supervisor.maxReviews} 个阶段门，` +
+          "为避免无界循环，请检查 Director 的最近决策后再继续。";
+        result.content = [
+          result.content,
+          limitNote,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
+        this.runtimeCore.pushDelta(context.state, `\n\n${limitNote}`);
+        this.runtimeCore.notify(context.state);
+        return result;
+      }
+
+      await this._persist(
+        context.threadId,
+        result.content || "（Worker 阶段完成，等待下一阶段）",
+        context.state.steps
+      );
+      this._startNextSegment(context.state);
+      turnMessages = (result.messages || turnMessages).filter(
+        message => message && message.role !== "system"
+      );
+      turnMessages.push({
+        role: "user",
+        content: formatDirectorInstruction(decision),
+      });
+    }
+  }
+
+  async _ledgerDigest(context) {
+    try {
+      return await context.backends.ledger.digest({}, context.toolContext);
+    } catch {
+      return "";
+    }
+  }
+
+  _buildLoopOptions(context, messages, overrides = {}) {
     const {
       abortController,
       assist,
@@ -377,7 +539,7 @@ export class AgentTurnOrchestrator {
       systemPrompt,
       dynamicContext,
       autoApprove: !confirmMode,
-      assist,
+      assist: overrides.assist ?? assist,
       vision,
       maxRounds,
       maxPerTool,

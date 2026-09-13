@@ -257,6 +257,42 @@ export class AgentRuntimeCore {
           ...(images && images.length ? { images } : {}),
         };
       }
+    } else if (event.type === "director_review") {
+      state.steps.push({
+        kind: "director",
+        id: `director-${event.reviewIndex}`,
+        reviewIndex: event.reviewIndex,
+        trigger: event.trigger || "stage_gate",
+        status: "reviewing",
+        action: "",
+        reason: "Director 正在审阅 Worker 证据包…",
+        guidance: "",
+      });
+      state._curText = -1;
+      state._curThink = -1;
+    } else if (event.type === "director_decision") {
+      const index = state.steps.findIndex(
+        item =>
+          item.kind === "director" &&
+          item.reviewIndex === event.reviewIndex &&
+          item.status === "reviewing"
+      );
+      if (index >= 0) {
+        const decision = event.decision || {};
+        state.steps[index] = {
+          ...state.steps[index],
+          status: "decided",
+          action: String(decision.action || "continue"),
+          reason: String(decision.reason || ""),
+          guidance: String(decision.guidance || ""),
+          nextPhase: String(decision.nextPhase || ""),
+          requiredEvidence: Array.isArray(decision.requiredEvidence)
+            ? decision.requiredEvidence.slice(0, 20)
+            : [],
+          finalAccepted: decision.finalAccepted === true,
+          verificationRuns: decision.verificationRuns || [],
+        };
+      }
     }
   }
 

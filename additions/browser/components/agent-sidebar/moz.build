@@ -11,6 +11,7 @@ EXTRA_JS_MODULES.agentsidebar += [
     "modules/AgentRuntimeCore.sys.mjs",
     "modules/AgentRuntimePorts.sys.mjs",
     "modules/AgentSession.sys.mjs",
+    "modules/AgentSupervisor.sys.mjs",
     "modules/AgentTurnOrchestrator.sys.mjs",
     "modules/Backends.sys.mjs",
     "modules/CodeBackend.sys.mjs",

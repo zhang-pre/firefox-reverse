@@ -205,7 +205,7 @@ check(
   clientCreations.length === 1 &&
     clientCreations[0].config !== config &&
     Object.keys(clientCreations[0].config).sort().join(",") ===
-      "getActiveModelProfile,getActiveProvider,getContextStrategy,getModel" &&
+      "getActiveModelProfile,getActiveProvider,getContextStrategy,getDirectorModelProfileId,getModel,getModelProfile,getWorkerModelProfileId" &&
     clientCreations[0].transport !== transport &&
     typeof clientCreations[0].transport.fetch === "function"
 );

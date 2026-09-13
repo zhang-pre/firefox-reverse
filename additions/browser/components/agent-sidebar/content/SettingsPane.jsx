@@ -15,6 +15,12 @@ function legacyProfile(store, providers) {
   };
 }
 
+function roleProfileLabel(profile) {
+  const key = String(profile?.apiKey || "");
+  const keyLabel = key ? `Key …${key.slice(-4)}` : "未配置 Key";
+  return `${profile.name} · ${profile.model || profile.provider} · ${keyLabel}`;
+}
+
 /** 模型配置管理：同一 provider 可保存多组账号/端点，选择历史配置即可切换。 */
 export default function SettingsPane({ store, providers, fetchModels, onClose }) {
   const initialProfiles = store.listModelProfiles
@@ -38,6 +44,12 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
   const [promptCacheMode, setPromptCacheMode] = useState(store.getPromptCacheMode ? store.getPromptCacheMode() : "auto");
   const [promptCacheTtl, setPromptCacheTtl] = useState(store.getPromptCacheTtl ? store.getPromptCacheTtl() : "default");
   const [contextStrategy, setContextStrategy] = useState(store.getContextStrategy ? store.getContextStrategy() : "projected");
+  const [workerProfileId, setWorkerProfileId] = useState(
+    store.getWorkerModelProfileId?.() || initialId
+  );
+  const [directorProfileId, setDirectorProfileId] = useState(
+    store.getDirectorModelProfileId?.() || initialId
+  );
   const [fetchedModels, setFetchedModels] = useState([]);
   const [fetchMsg, setFetchMsg] = useState("");
   const [manual, setManual] = useState(false);
@@ -123,6 +135,8 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
       const next = store.listModelProfiles();
       const activeId = store.getActiveModelProfileId();
       setProfiles(next);
+      setWorkerProfileId(store.getWorkerModelProfileId?.() || activeId);
+      setDirectorProfileId(store.getDirectorModelProfileId?.() || activeId);
       loadProfile(next.find(p => p.id === activeId) || next[0], "配置已删除");
     } catch (e) {
       setError((e && e.message) || String(e));
@@ -171,6 +185,8 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
       store.setPromptCacheMode?.(promptCacheMode);
       store.setPromptCacheTtl?.(promptCacheTtl);
       store.setContextStrategy?.(contextStrategy);
+      store.setWorkerModelProfileId?.(workerProfileId);
+      store.setDirectorModelProfileId?.(directorProfileId);
       loadProfile(p, "已保存并设为当前配置");
     } catch (e) {
       setError((e && e.message) || String(e));
@@ -297,6 +313,29 @@ export default function SettingsPane({ store, providers, fetchModels, onClose })
         </div>
         {fetchMsg && <span className="settings-pane__hint">{fetchMsg}</span>}
       </label>
+
+      <section className="settings-pane__section">
+        <div className="settings-pane__section-title">双模型领航</div>
+        <label className="settings-pane__field">
+          Worker（执行工具）
+          <select value={workerProfileId} onChange={e => { setWorkerProfileId(e.target.value); setStatus(""); }}>
+            {profiles.map(p => (
+              <option key={p.id} value={p.id}>{roleProfileLabel(p)}</option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-pane__field">
+          Director（决策与验收）
+          <select value={directorProfileId} onChange={e => { setDirectorProfileId(e.target.value); setStatus(""); }}>
+            {profiles.map(p => (
+              <option key={p.id} value={p.id}>{roleProfileLabel(p)}</option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-pane__hint">
+          每个角色严格使用所选配置自己的 Key、端点和模型；空 Key 不会回退到其它配置。Director 在阶段门审阅，最终通过 run_node/run_python 验收 out 产物，每次最多 3 次。
+        </span>
+      </section>
 
       <label className="settings-pane__field settings-pane__field--check">
         <input type="checkbox" checked={confirmTools} onChange={e => { setConfirmTools(e.target.checked); setStatus(""); }} />

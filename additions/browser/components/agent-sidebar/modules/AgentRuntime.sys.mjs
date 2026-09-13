@@ -2,6 +2,7 @@
 
 import { runAgentTurn } from "./AgentLoop.sys.mjs";
 import { AgentRuntimeCore } from "./AgentRuntimeCore.sys.mjs";
+import { AgentSupervisor } from "./AgentSupervisor.sys.mjs";
 import {
   assertAgentBackendsPort,
   assertAgentRouterPort,
@@ -46,6 +47,7 @@ export function createAgentRuntime(inputPorts) {
     runtimeCore,
     ports,
     runAgentTurn,
+    supervisor: new AgentSupervisor(),
   });
   const runLog = [];
   let disposed = false;

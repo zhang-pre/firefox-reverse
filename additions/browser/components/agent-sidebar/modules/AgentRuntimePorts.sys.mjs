@@ -18,6 +18,9 @@ export const AGENT_RUNTIME_PORTS_VERSION = 1;
  * @typedef {object} AgentRuntimeConfigPort
  * @property {function(): "legacy"|"projected"|string} getContextStrategy
  * @property {function(): object|null} getActiveModelProfile
+ * @property {function(string): object|null} [getModelProfile]
+ * @property {function(): string} [getWorkerModelProfileId]
+ * @property {function(): string} [getDirectorModelProfileId]
  * @property {function(): string} getActiveProvider
  * @property {function(string): string} getModel
  */
@@ -226,6 +229,18 @@ export function defineAgentRuntimePorts(input) {
     getActiveModelProfile: bound(config, "getActiveModelProfile"),
     getActiveProvider: bound(config, "getActiveProvider"),
     getModel: bound(config, "getModel"),
+    getModelProfile:
+      config.getModelProfile == null
+        ? () => null
+        : bound(config, "getModelProfile"),
+    getWorkerModelProfileId:
+      config.getWorkerModelProfileId == null
+        ? () => config.getActiveModelProfile()?.id || ""
+        : bound(config, "getWorkerModelProfileId"),
+    getDirectorModelProfileId:
+      config.getDirectorModelProfileId == null
+        ? () => config.getActiveModelProfile()?.id || ""
+        : bound(config, "getDirectorModelProfileId"),
   });
   const normalizedConversations = Object.freeze({
     consumeCancellationBoundary: bound(

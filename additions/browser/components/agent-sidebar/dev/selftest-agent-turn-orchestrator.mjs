@@ -1,6 +1,11 @@
 import { AgentRuntimeCore } from "../modules/AgentRuntimeCore.sys.mjs";
 import { defineAgentRuntimePorts } from "../modules/AgentRuntimePorts.sys.mjs";
 import { AgentTurnOrchestrator } from "../modules/AgentTurnOrchestrator.sys.mjs";
+import {
+  buildEvidencePacket,
+  inferDirectorTrigger,
+  parseDirectorDecision,
+} from "../modules/AgentSupervisor.sys.mjs";
 import { emptyUsage } from "../modules/Usage.sys.mjs";
 
 let pass = 0;
@@ -15,19 +20,29 @@ function check(name, condition) {
   }
 }
 
-function makeHarness({ turns = [], boundary = false, backendError = null } = {}) {
+function makeHarness({
+  turns = [],
+  boundary = false,
+  backendError = null,
+  directorDecisions = [],
+} = {}) {
   let clock = 1000;
   const calls = [];
   const messages = [];
   const statuses = [];
   const usage = [];
   const writes = [];
+  const directorCalls = [];
+  const clientCreations = [];
+  const order = [];
   const router = {
     name: "test-router",
     listSpecs: () => [],
     needsConfirm: () => false,
-    async dispatch() {
-      return { ok: true };
+    async dispatch(name, args, ctx) {
+      order.push("director-tool");
+      if (name !== "run_node" || args.file !== "out/solver.js" || ctx.workspaceRoot !== "/work") throw new Error("wrong verification context");
+      return { ok: true, data: { ok: true, exitCode: 0, output: 'HTTP 200 {"data":[1,2]}' } };
     },
   };
   const core = new AgentRuntimeCore({
@@ -75,6 +90,20 @@ function makeHarness({ turns = [], boundary = false, backendError = null } = {})
     protocol: "openai",
     model: "vision-model",
   };
+  const directorClient = {
+    providerId: "director-mock",
+    protocol: "openai",
+    model: "director-model",
+    async chat(requestMessages, options) {
+      order.push("director");
+      directorCalls.push({ messages: requestMessages, options });
+      const next = directorDecisions.shift();
+      return {
+        ...(next?.toolCalls ? next : { content: JSON.stringify(next) }),
+        usage: { prompt_tokens: 5, completion_tokens: 2 },
+      };
+    },
+  };
   const ports = defineAgentRuntimePorts({
     clock: {
       now: () => clock++,
@@ -90,6 +119,9 @@ function makeHarness({ turns = [], boundary = false, backendError = null } = {})
       }),
       getActiveProvider: () => "mock",
       getModel: () => "vision-model",
+      getModelProfile: id => ({ id, provider: "mock", model: id }),
+      getWorkerModelProfileId: () => "worker-profile",
+      getDirectorModelProfileId: () => "director-profile",
     },
     conversations: conversationStore,
     llm: {
@@ -101,7 +133,10 @@ function makeHarness({ turns = [], boundary = false, backendError = null } = {})
         setTimeout,
         clearTimeout,
       },
-      createClient: () => client,
+      createClient: input => {
+        clientCreations.push(input);
+        return input.role === "director" ? directorClient : client;
+      },
       isVisionModel: model => model === "vision-model",
     },
     tools: {
@@ -123,6 +158,7 @@ function makeHarness({ turns = [], boundary = false, backendError = null } = {})
     runtimeCore: core,
     ports,
     runAgentTurn: async options => {
+      order.push("worker");
       calls.push(options);
       const turn = turns.shift() || { result: { content: "", stopReason: "final" } };
       if (turn.delta) {
@@ -146,6 +182,9 @@ function makeHarness({ turns = [], boundary = false, backendError = null } = {})
     usage,
     writes,
     router,
+    directorCalls,
+    clientCreations,
+    order,
   };
 }
 
@@ -277,6 +316,174 @@ check(
   "new segment owns only its own live steps",
   continuedState.steps.length === 1 &&
     continuedState.steps[0].text === "final stream"
+);
+
+const incompletePacket = buildEvidencePacket({
+  objective: "produce a verified client",
+  result: {
+    content: "candidate_complete: true",
+    stopReason: "final",
+    toolCalls: [],
+  },
+});
+check(
+  "explicit incomplete evidence cannot be mistaken for a final candidate",
+  inferDirectorTrigger({
+    content: "phase: P2\ncandidate_complete: false\nP2 已完成",
+    stopReason: "final",
+  }) === "stage_gate"
+);
+const failedArtifactPacket = buildEvidencePacket({
+  result: {
+    content: "candidate_complete: false",
+    toolCalls: [
+      {
+        id: "failed-file",
+        name: "fs_write",
+        args: { path: "out/not-created.js" },
+        env: { ok: false, error: "write failed" },
+      },
+    ],
+  },
+});
+check(
+  "failed tool calls cannot create artifact evidence",
+  failedArtifactPacket.artifacts.length === 0
+);
+const rejectedFinish = parseDirectorDecision(
+  JSON.stringify({
+    action: "finish",
+    reason: "worker says it is done",
+    guidance: "run the missing verification",
+    nextPhase: "P6",
+    requiredEvidence: ["standalone artifact", "live response"],
+    finalAcceptance: {
+      independentArtifactVerified: true,
+      liveRequestVerified: true,
+      evidenceRefs: ["made-up"],
+    },
+  }),
+  incompletePacket
+);
+check(
+  "finish is rejected when artifact/live evidence cannot be resolved",
+  rejectedFinish.action === "continue" && !rejectedFinish.finalAccepted
+);
+
+const supervised = makeHarness({
+  turns: [
+    {
+      delta: "worker phase one",
+      result: {
+        content:
+          "[WORKER_EVIDENCE]\nphase: P4\ncandidate_complete: false\n[/WORKER_EVIDENCE]",
+        stopReason: "final",
+        messages: [
+          { role: "user", content: "build a verified client" },
+          { role: "assistant", content: "phase P4" },
+        ],
+        toolCalls: [
+          {
+            id: "file-1",
+            name: "fs_write",
+            args: { path: "out/solver.js" },
+            env: { ok: true, data: { path: "out/solver.js" } },
+          },
+        ],
+      },
+    },
+    {
+      delta: "worker final",
+      result: {
+        content:
+          "[WORKER_EVIDENCE]\nphase: P6\ncandidate_complete: true\n[/WORKER_EVIDENCE]",
+        stopReason: "final",
+        messages: [{ role: "assistant", content: "phase P6" }],
+        toolCalls: [
+          {
+            id: "live-1",
+            name: "run_node",
+            args: {
+              file: "out/solver.js",
+              url: "https://api.example.test/data",
+            },
+            env: {
+              ok: true,
+              data: { statusCode: 200, response: { records: 2 } },
+            },
+          },
+        ],
+      },
+    },
+  ],
+  directorDecisions: [
+    {
+      action: "redirect",
+      reason: "缺少真实接口成功响应",
+      guidance: "运行独立脚本并保留 HTTP 状态与响应摘要",
+      nextPhase: "P6",
+      requiredEvidence: ["live request"],
+      finalAcceptance: {
+        independentArtifactVerified: false,
+        liveRequestVerified: false,
+        evidenceRefs: ["tool:file-1"],
+      },
+    },
+    { toolCalls: [{ id: "verify-1", type: "function", function: { name: "run_node", arguments: JSON.stringify({ file: "out/solver.js", args: [] }) } }] },
+    {
+      action: "finish",
+      reason: "独立产物和真实接口响应均已由工具证明",
+      guidance: "",
+      nextPhase: "",
+      requiredEvidence: [],
+      finalAcceptance: {
+        independentArtifactVerified: true,
+        liveRequestVerified: true,
+        evidenceRefs: ["director:2:1"],
+      },
+    },
+  ],
+});
+await supervised.orchestrator.run("thread-supervised", {
+  convo: [{ role: "user", content: "build a verified client" }],
+  supervised: true,
+  workspaceRoot: "/work",
+});
+const supervisedState = supervised.core.getState("thread-supervised");
+check(
+  "supervised mode is strictly sequential",
+  supervised.order.join(",") === "worker,director,worker,director,director-tool,director"
+);
+check(
+  "Director only receives execution tools at final acceptance",
+  supervised.directorCalls.length === 3 &&
+    supervised.directorCalls[0].options.tools == null &&
+    supervised.directorCalls[1].options.tools.map(t => t.function.name).join(",") === "run_node,run_python"
+);
+check(
+  "worker and Director use their selected model profiles",
+  supervised.clientCreations.map(call => `${call.role}:${call.profileId}`).join(",") ===
+    "worker:worker-profile,director:director-profile"
+);
+check(
+  "Director redirect is injected into the next Worker stage",
+  supervised.calls.length === 2 &&
+    supervised.calls.every(call => call.assist === true) &&
+    supervised.calls[1].messages.at(-1).content.includes("Director 决策：redirect")
+);
+check(
+  "final acceptance keeps a visible Director decision and evidence-backed result",
+  supervisedState.settled &&
+    supervisedState.content.includes("Director 最终验收") &&
+    supervisedState.steps.some(
+      step => step.kind === "director" && step.action === "finish"
+    )
+);
+check(
+  "supervised segments and Director usage are persisted",
+  supervised.messages.length === 2 &&
+    supervised.usage.length === 1 &&
+    supervised.usage[0].requests === 3
 );
 
 const failed = makeHarness({

@@ -195,7 +195,7 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       workspace: workspace || null,
-      mode: mode || null, // "auto"=全自动一条龙 / "assist"=AI辅助逐阶段 / null=未选（用时默认 auto）
+      mode: mode || null, // auto=全自动 / assist=用户领航 / supervised=双模型领航 / null=未选
       envId: null,
       modelStrategy: "balanced",
       lastTurnStatus: "idle",
@@ -222,12 +222,12 @@ export class ConversationStore {
     return t;
   }
 
-  /** 设置/更新会话的执行模式（auto=全自动 / assist=AI辅助逐阶段）。按会话持久化，一选定整条会话沿用。 */
+  /** 设置/更新会话执行模式（auto / assist / supervised）。按会话持久化。 */
   async setThreadMode(id, mode) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
-      t.mode = mode || null;
+      t.mode = ["auto", "assist", "supervised"].includes(mode) ? mode : null;
       t.updatedAt = nextTs();
       await this._save();
     }
@@ -446,7 +446,9 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       workspace: null,
-      mode: src.mode === "assist" || src.mode === "auto" ? src.mode : null,
+      mode: ["assist", "auto", "supervised"].includes(src.mode)
+        ? src.mode
+        : null,
       envId: null,
       modelStrategy: src.modelStrategy === "premium" ? "premium" : "balanced",
       lastTurnStatus: "idle",

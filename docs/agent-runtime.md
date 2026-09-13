@@ -9,18 +9,28 @@ core into privileged browser APIs.
 1. **AgentRuntimeCore** owns in-memory thread state, event reduction,
    subscriptions, confirmation state, cancellation, and window reservations.
    It has no Firefox imports and is directly testable in Node.
-2. **AgentLoop** is the decision engine. It receives an LLM client, a tool
+2. **AgentRuntimePorts** validates and attenuates the host capabilities exposed
+   to the portable runtime: clock, config, conversations, LLM, tools, and
+   lifecycle.
+3. **AgentRuntime** is the platform-neutral composition root. It assembles the
+   state core, turn orchestrator, supervisor, loop, and normalized ports.
+4. **AgentTurnOrchestrator** coordinates projection, persistence, usage,
+   checkpoints, automatic continuation, and the optional supervised stage-gate
+   loop.
+5. **AgentSupervisor** builds bounded evidence packets and runs the
+   Director. It validates the Director's decision contract and enforces final
+   acceptance requirements in code.
+6. **AgentLoop** is the Worker decision engine. It receives an LLM client, a tool
    router, messages, limits, and callbacks. It does not know which browser or
    operating system executes a tool.
-3. **LlmClient + LlmTransport** adapt provider protocols and stream responses.
-   Fetch, abort controllers, and timers are supplied through the transport port.
-4. **AgentSession** is the application service. It coordinates projection,
-   persistence, usage accounting, checkpoints, and automatic continuation while
-   preserving the public singleton API used by the sidebar and MCP bridge.
-5. **FirefoxAgentRuntimeHost** is the privileged composition root. It owns the
-   Firefox timer adapter, application-shutdown observer, ToolRouter singleton,
-   and browser backend graph.
-6. **Backends and AgentEvalChild** implement capabilities. These are outside the
+7. **LlmClient** is the stable facade over LlmProtocol, LlmStreamParser,
+   LlmRequestExecutor, and LlmTransport. Fetch, abort controllers, and timers
+   are supplied through the transport port.
+8. **FirefoxAgentRuntimeHost** adapts Firefox timers, shutdown, ToolRouter,
+   backends, transport, and opaque host contexts to the formal ports.
+9. **AgentSession** is the thin Firefox entry point. It creates the ports and
+   exports the process-lifetime shared runtime used by the sidebar and MCP.
+10. **Backends and AgentEvalChild** implement capabilities. These are outside the
    runtime core and are reached only through ToolRouter dispatch.
 
 ## Runtime flow
@@ -28,10 +38,57 @@ core into privileged browser APIs.
 ```text
 AgentPanel
   -> AgentSession
-     -> AgentRuntimeCore
-     -> LlmClient -> LlmTransport
-     -> AgentLoop -> ToolRouter -> Firefox backends -> JSWindowActor/Gecko
+     -> FirefoxAgentRuntimeHost -> AgentRuntimePorts
+     -> AgentRuntime
+        -> AgentRuntimeCore
+        -> AgentTurnOrchestrator
+           -> LlmClient -> LlmRequestExecutor -> LlmTransport
+           -> AgentLoop -> ToolRouter -> Firefox backends -> JSWindowActor/Gecko
+           -> AgentSupervisor -> Director LlmClient
+                                -> final-only run_node/run_python callback
 ```
+
+## Supervised mode MVP
+
+`supervised` is a third per-thread strategy alongside `auto` and `assist`.
+Worker and Director are never run in parallel:
+
+```text
+Worker tools and reasoning
+  -> stage gate / limit / final candidate
+  -> bounded evidence packet
+  -> Director strict JSON decision
+     -> continue or redirect -> internal instruction -> next Worker segment
+     -> ask_user            -> settle and return control to the user
+     -> finish              -> code-level final acceptance -> settle
+```
+
+Ordinary stage reviews have no tools. At `final_candidate`, Director receives
+only `run_node` and `run_python`, with `file` and string-array `args`. It can run
+at most three calls per review, sequentially, through the existing Router and
+thread-bound workspace/cancellation context. Only explicit `out/*.js`, `.mjs`,
+`.cjs`, or `.py` entry files are accepted; inline code and other tools are rejected.
+Each execution has a 30-second timeout. Director must not modify deliverables;
+it returns failures and requested corrections to Worker in its structured decision.
+
+The actions remain `continue`, `redirect`, `finish`, and `ask_user`. `finish`
+requires at least one fresh successful Director execution, no failed/timed-out/
+aborted/truncated execution in this review, a reference to its `director:*`
+receipt, and Director's confirmation that the actual business response meets
+the objective. Worker history alone cannot satisfy acceptance. Receipts are
+retained in the Director UI step and sent back to Worker on continuation.
+
+This MVP is not a process sandbox: executed scripts can themselves access files
+and the network. File-only tool arguments limit the interface, not OS permissions.
+Exit code 0 does not prove business success; Director interprets the output.
+Script stdout is not independently authenticated network evidence. No separate
+Verifier role or host-level network attestation is introduced.
+
+Evidence packets contain a clipped Worker summary, tool success statistics,
+bounded tool results, artifact paths, ledger digest, trigger, phase, and the
+previous Director decision. They deliberately exclude full conversation and
+unbounded tool output. Every string inside a packet is treated as untrusted data,
+so embedded page or tool-output instructions do not override the Director role.
 
 ## Boundary rules
 
@@ -40,10 +97,13 @@ AgentPanel
   `LlmTransport`.
 - Pass the selected window, workspace, and cancellation signal through tool
   context instead of reading global focus state.
-- Keep provider protocol conversion in `LlmClient`; keep credentials and model
-  profiles in `ConfigStore`.
-- Keep session persistence in `AgentSession`/conversation ports, not in the
+- Keep provider protocol conversion in the LLM protocol stack; keep API
+  credentials and Worker/Director profile references in `ConfigStore`.
+- Keep session persistence in `AgentTurnOrchestrator`/conversation ports, not in the
   state kernel.
+- Director receives only the two restricted final-execution schemas. Supervisor
+  validates calls before forwarding them through Orchestrator's execution callback.
+  Direction changes and repairs return through the decision contract to Worker.
 - New privileged capabilities must be implemented as backends and registered in
   `Tools.sys.mjs`; they must not be called directly by the decision engine.
 - A non-Firefox host can reuse the core by supplying timers, lifecycle hooks, an
@@ -51,8 +111,11 @@ AgentPanel
 
 ## Extension points
 
-- **New scheduling policy:** change or wrap `AgentLoop.runAgentTurn`.
-- **New model protocol:** add protocol codecs in `LlmClient`; transport stays
+- **New scheduling policy:** extend `AgentTurnOrchestrator` while keeping
+  `AgentLoop.runAgentTurn` platform-neutral.
+- **New review gate or decision field:** extend `AgentSupervisor` and its tests;
+  retain the per-review execution budget and final-acceptance guard.
+- **New model protocol:** add protocol codecs in `LlmProtocol`; transport stays
   unchanged.
 - **Proxy, replay, or offline inference:** inject a different `LlmTransport`.
 - **New browser capability:** add a backend, wire it in `Backends.sys.mjs`, and

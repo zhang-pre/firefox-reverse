@@ -240,27 +240,37 @@ export function listProviders() {
  */
 export function buildClientFromStore(store, overrides = {}) {
   // vNext：优先使用当前命名模型配置；旧 ConfigStore getter 仍作为兼容兜底。
-  const profile =
-    !overrides.provider && store.getActiveModelProfile ? store.getActiveModelProfile() : null;
+  let profile = null;
+  if (!overrides.provider) {
+    if (overrides.profileId) {
+      profile = store.getModelProfile?.(overrides.profileId) || null;
+      if (!profile) {
+        throw new Error(`模型配置不存在: ${overrides.profileId}`);
+      }
+    } else {
+      profile = store.getActiveModelProfile?.() || null;
+    }
+  }
   const id = overrides.provider || (profile && profile.provider) || store.getActiveProvider();
   const p = BUILTIN_PROVIDERS[id];
   if (!p) {
     throw new Error(`unknown provider: ${id}`);
   }
   let protocol = p.protocol;
-  let baseUrl = overrides.baseUrl || p.baseUrl;
+  let baseUrl = overrides.baseUrl ?? p.baseUrl;
   let chatPath = p.chatPath;
   let reasoningEffort = "auto";
   if (id === "custom") {
     protocol =
-      (profile && profile.protocol) ||
-      (store.getCustomProtocol && store.getCustomProtocol()) ||
+      (profile
+        ? profile.protocol
+        : store.getCustomProtocol && store.getCustomProtocol()) ||
       "openai";
     baseUrl = normalizeBaseUrl(
-      overrides.baseUrl ||
-        (profile && profile.baseUrl) ||
-        (store.getCustomBaseUrl && store.getCustomBaseUrl()) ||
-        ""
+      overrides.baseUrl ??
+        (profile
+          ? profile.baseUrl
+          : (store.getCustomBaseUrl && store.getCustomBaseUrl()) || "")
     );
     chatPath = resolveChatPath(protocol, baseUrl);
     reasoningEffort = normalizeReasoningEffort(
@@ -278,8 +288,15 @@ export function buildClientFromStore(store, overrides = {}) {
     providerId: id,
     baseUrl,
     chatPath,
-    apiKey: overrides.apiKey || (profile && profile.apiKey) || store.getApiKey(id),
-    model: overrides.model || (profile && profile.model) || store.getModel(id) || p.defaultModel,
+    // A named profile is an isolation boundary. In particular, an empty Key
+    // must not silently fall back to the active profile of the same provider.
+    apiKey:
+      overrides.apiKey ??
+      (profile ? profile.apiKey : store.getApiKey(id)),
+    model:
+      overrides.model ||
+      (profile ? profile.model : store.getModel(id)) ||
+      p.defaultModel,
     promptCacheMode:
       overrides.promptCacheMode ||
       (store.getPromptCacheMode && store.getPromptCacheMode()) ||

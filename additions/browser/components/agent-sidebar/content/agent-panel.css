@@ -437,6 +437,44 @@ body {
   overflow-y: auto;
 }
 
+/* 双模型领航：只读 Director 的阶段门判定。 */
+.msg__director {
+  margin: 8px 0;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, #8b5cf6 55%, var(--in-content-border-color, ThreeDShadow));
+  border-left: 4px solid #8b5cf6;
+  border-radius: 8px;
+  background: color-mix(in srgb, #8b5cf6 8%, var(--in-content-box-background, Field));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg__director.is-finish { border-left-color: #2e9d5b; }
+.msg__director.is-redirect { border-left-color: #d9822b; }
+.msg__director.is-ask_user { border-left-color: #d64545; }
+.msg__director-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--in-content-page-color, FieldText);
+  font-size: 0.84em;
+  font-weight: 650;
+}
+.msg__director-trigger {
+  color: var(--in-content-deemphasized-text, GrayText);
+  font-size: 0.82em;
+  font-weight: 400;
+}
+.msg__director-reason,
+.msg__director-guide,
+.msg__director-evidence {
+  margin-top: 5px;
+  font-size: 0.86em;
+  line-height: 1.42;
+}
+.msg__director-guide,
+.msg__director-evidence { color: var(--in-content-deemphasized-text, GrayText); }
+
 /* 截图缩略图 */
 .msg__shot {
   display: block;
@@ -670,7 +708,7 @@ body {
   color: var(--in-content-page-color, FieldText);
 }
 
-/* 模式 chip（全自动 / AI辅助，随时点击切换） */
+/* 模式 chip（三种执行策略，随时点击切换） */
 .agent-ws__mode {
   display: inline-flex;
   align-items: center;
@@ -687,11 +725,13 @@ body {
 .agent-ws__mode:hover { background: var(--in-content-button-background-hover, rgba(128,128,128,0.15)); }
 .agent-ws__mode.is-assist { color: var(--in-content-page-color, FieldText); border-color: #6a8cff; }
 .agent-ws__mode.is-auto { color: var(--in-content-page-color, FieldText); border-color: var(--in-content-primary-button-background, Highlight); }
+.agent-ws__mode.is-supervised { color: var(--in-content-page-color, FieldText); border-color: #8b5cf6; }
 .agent-ws__mode.is-unset { border-style: dashed; }
 .agent-ws__mode-ico { display: inline-flex; align-items: center; }
 .agent-ws__mode-ico svg { width: 13px; height: 13px; }
 .agent-ws__mode.is-assist .agent-ws__mode-ico { color: #6a8cff; }
 .agent-ws__mode.is-auto .agent-ws__mode-ico { color: var(--in-content-primary-button-background, Highlight); }
+.agent-ws__mode.is-supervised .agent-ws__mode-ico { color: #8b5cf6; }
 
 /* 模式选择卡（空状态首次让用户选） */
 .agent-mode-pick { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; margin: 4px auto 14px; }

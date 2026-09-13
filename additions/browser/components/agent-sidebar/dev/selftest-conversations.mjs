@@ -75,11 +75,15 @@ ok((await s.getThread(t1.id)).cancellationPending === true, "手动停止写入�
 ok((await s.consumeCancellationBoundary(t1.id)) === true, "下一轮消费取消边界");
 ok((await s.consumeCancellationBoundary(t1.id)) === false, "取消边界只消费一次");
 
+await s.setThreadMode(t1.id, "supervised");
+ok((await s.getThread(t1.id)).mode === "supervised", "双模型领航模式按会话持久化");
+
 const bundle = await s.exportThread(t1.id);
 ok(bundle.format === "firefox-reverse-conversation" && bundle.schemaVersion === 1, "导出包格式带版本");
 ok(!("workspace" in bundle.conversation) && !("envId" in bundle.conversation), "导出不携带本机目录和环境绑定");
 const imported = await s.importThread(JSON.stringify(bundle));
 ok(imported.id !== t1.id && imported.messages.length === 2, "导入生成新 id 并保留消息");
+ok(imported.mode === "supervised", "导入保留双模型领航模式");
 ok(imported.workspace === null && imported.envId === null && imported.lastTurnStatus === "idle", "导入会话保持静止且不绑定本机资源");
 ok(imported.contextProjection === null && imported.usage.requests === 0, "导入不携带运行期投影和 Usage");
 let badImport = false;
