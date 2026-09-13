@@ -71,7 +71,7 @@ thread-bound workspace/cancellation context. Only explicit `out/*.js`, `.mjs`,
 Each execution has a 30-second timeout. Director must not modify deliverables;
 it returns failures and requested corrections to Worker in its structured decision.
 
-The actions remain `continue`, `redirect`, `finish`, and `ask_user`. `finish`
+The actions are `continue`, `redirect`, `finish`, `ask_user`, and `stop`. `finish`
 requires at least one fresh successful Director execution, no failed/timed-out/
 aborted/truncated execution in this review, a reference to its `director:*`
 receipt, and Director's confirmation that the actual business response meets
@@ -83,6 +83,30 @@ and the network. File-only tool arguments limit the interface, not OS permission
 Exit code 0 does not prove business success; Director interprets the output.
 Script stdout is not independently authenticated network evidence. No separate
 Verifier role or host-level network attestation is introduced.
+
+Review timing is driven by Worker segment returns, not a phase detector:
+`_runSupervised` runs AgentLoop with `assist: true`, so a non-truncated response
+without tool calls ends the segment and invokes Director. P1/P2/P4/P6 gates are
+prompt guidance only. `inferDirectorTrigger` classifies the returned segment in
+priority order: `max_rounds`, `drift`, explicit `candidate_complete`, then legacy
+completion phrases; other returns are ordinary stage gates. The phase label is
+display metadata, not a scheduler condition.
+
+Automatic repair stops after three consecutive reviews that request continuation
+while reporting a blocker (`Director.blocked` or `Worker blocked: true`), rejecting
+a final candidate, recovering drift, or receiving no successful Worker tool calls.
+A normal intermediate stage with successful tool activity and no reported blocker resets this count.
+This is a bounded retry policy, not automatic proof of progress or matching of
+root causes. Director sees the count and the last three decisions. It may return
+`stop` earlier for an evidenced unresolved constraint, or `ask_user` for missing
+input. The overall twelve-review cap remains as a fallback.
+
+On `stop`, `ask_user`, or either cap, Worker makes one report-only LLM request
+with no tools, summarizing verified progress, unfinished work, attempted fixes,
+failure evidence, deliverables/commands, uncertainties and conditions to resume.
+This report is never reviewed again by Director. If generation fails, existing
+evidence is preserved in a fallback report. The task is visibly incomplete and
+uses the existing `failed` turn status rather than marking acceptance successful.
 
 Evidence packets contain a clipped Worker summary, tool success statistics,
 bounded tool results, artifact paths, ledger digest, trigger, phase, and the

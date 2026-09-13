@@ -76,6 +76,7 @@ rejected_hypotheses: 已否决路线
 artifacts: out/ 中可运行交付文件路径、运行时和参数（例如 run_node file=out/main.js args=["2"]），以及必要依赖
 live_request: 真实接口响应状态与关键结果
 next_step: 若未完成，下一步最小动作
+blocked: true|false（当前是否受阻、没有实质突破；列出限制和具体失败证据）
 [/WORKER_EVIDENCE]
 3. 只有已经产出可独立运行脚本、真实接口成功响应且能引用证据时，candidate_complete 才能为 true。普通文字总结不算完成。
 4. Director 的 continue/redirect 决策会作为下一条内部指令返回；严格执行其中的证据要求，然后进入下一个阶段门。
@@ -198,6 +199,7 @@ const DIRECTOR_ACTION_LABELS = {
   redirect: "方向修正",
   finish: "最终通过",
   ask_user: "请求用户输入",
+  stop: "受阻收尾",
 };
 
 function DirectorSeg({ step }) {

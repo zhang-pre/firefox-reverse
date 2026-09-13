@@ -450,7 +450,8 @@ body {
 }
 .msg__director.is-finish { border-left-color: #2e9d5b; }
 .msg__director.is-redirect { border-left-color: #d9822b; }
-.msg__director.is-ask_user { border-left-color: #d64545; }
+.msg__director.is-ask_user,
+.msg__director.is-stop { border-left-color: #d64545; }
 .msg__director-head {
   display: flex;
   align-items: center;
