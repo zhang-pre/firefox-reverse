@@ -5,7 +5,7 @@ import {
   LedgerBackend,
   ledgerDeleteByIdsSql,
   ledgerScopeSql,
-} from "../modules/LedgerBackend.sys.mjs";
+} from "../modules/backends/LedgerBackend.sys.mjs";
 
 let pass = 0;
 let fail = 0;

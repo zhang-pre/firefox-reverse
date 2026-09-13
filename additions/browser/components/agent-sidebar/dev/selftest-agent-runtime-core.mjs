@@ -1,4 +1,4 @@
-import { AgentRuntimeCore } from "../modules/AgentRuntimeCore.sys.mjs";
+import { AgentRuntimeCore } from "../modules/runtime/AgentRuntimeCore.sys.mjs";
 
 let pass = 0;
 let fail = 0;

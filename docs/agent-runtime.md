@@ -6,6 +6,14 @@ core into privileged browser APIs.
 
 ## Layers
 
+Sources are grouped under `additions/browser/components/agent-sidebar/modules/`:
+`runtime/` (including Worker/Director supervision), `llm/`, `providers/`,
+`state/`, `tools/`, `backends/`, and `host/`.
+The [module directory guide](../additions/browser/components/agent-sidebar/modules/README.md)
+maps responsibilities and installation paths. New code imports these grouped
+paths; `compat/` preserves the previous flat Firefox resource URLs by re-exporting
+the same implementations, including the shared AgentSession instance.
+
 1. **AgentRuntimeCore** owns in-memory thread state, event reduction,
    subscriptions, confirmation state, cancellation, and window reservations.
    It has no Firefox imports and is directly testable in Node.

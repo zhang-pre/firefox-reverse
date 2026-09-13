@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { parseSkillFrontmatter, SkillRegistry } from "../modules/SkillBackend.sys.mjs";
+import { parseSkillFrontmatter, SkillRegistry } from "../modules/backends/SkillBackend.sys.mjs";
 
 let pass = 0, fail = 0;
 const ok = (c, m) => (c ? (pass++, console.log("  OK", m)) : (fail++, console.error("  FAIL", m)));

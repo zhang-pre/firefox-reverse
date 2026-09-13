@@ -23,6 +23,7 @@ SELFTESTS=(
   selftest-addons.mjs
   selftest-agent-runtime-core.mjs
   selftest-agent-runtime-factory.mjs
+  selftest-agent-supervisor.mjs
   selftest-agent-turn-orchestrator.mjs
   selftest-config.mjs
   selftest-mozbuild.mjs

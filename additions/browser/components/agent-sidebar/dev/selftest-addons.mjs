@@ -1,6 +1,6 @@
-import { AddonBackend } from "../modules/AddonBackend.sys.mjs";
-import { createBuiltinTools } from "../modules/Tools.sys.mjs";
-import { ToolRouter } from "../modules/ToolRouter.sys.mjs";
+import { AddonBackend } from "../modules/backends/AddonBackend.sys.mjs";
+import { createBuiltinTools } from "../modules/tools/Tools.sys.mjs";
+import { ToolRouter } from "../modules/tools/ToolRouter.sys.mjs";
 
 let pass = 0;
 let fail = 0;

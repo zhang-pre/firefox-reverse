@@ -4,11 +4,11 @@
  * Firefox adapters and exports the process-lifetime instance used by UI/MCP.
  */
 
-import { createAgentRuntime } from "./AgentRuntime.sys.mjs";
-import { configStore } from "./ConfigStore.sys.mjs";
-import { conversationStore } from "./ConversationStore.sys.mjs";
+import { createAgentRuntime } from "../runtime/AgentRuntime.sys.mjs";
+import { configStore } from "../providers/ConfigStore.sys.mjs";
+import { conversationStore } from "../state/ConversationStore.sys.mjs";
 import { createFirefoxAgentRuntimePorts } from "./FirefoxAgentRuntimeHost.sys.mjs";
-import { buildClientFromStore, isVisionModel } from "./providers.sys.mjs";
+import { buildClientFromStore, isVisionModel } from "../providers/providers.sys.mjs";
 
 
 const ports = createFirefoxAgentRuntimePorts({

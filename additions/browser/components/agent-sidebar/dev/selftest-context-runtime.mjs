@@ -1,4 +1,4 @@
-import { runAgentTurn } from "../modules/AgentLoop.sys.mjs";
+import { runAgentTurn } from "../modules/runtime/AgentLoop.sys.mjs";
 
 let pass = 0;
 let fail = 0;

@@ -7,10 +7,12 @@ Agent 侧边栏的 **UI + LLM 调用源码层**。配合 [`patches/agent-ui/`](.
 | 目录 | 内容 | 打包 |
 |---|---|---|
 | `content/` | React 面板（`.jsx`）：AgentPanel / SettingsPane / ...（A1 待写） | 经 esbuild 打包注入 omni.ja |
-| `modules/` | chrome-privileged ESM（`.sys.mjs`）：LlmClient ✅ / ConfigStore(A1) / ToolRouter(A3) / TraceBridge(A4) | 进 omni.ja |
+| `modules/` | 按 runtime、llm、providers、state、tools、backends、host 分组的 ESM；含平台无关核心与 Firefox 适配 | 进 omni.ja |
 | `dev/` | Node 自测脚本，**不随浏览器打包**（jar.mn 排除） | 否 |
 
 ## 与 jsvmp 线的文件边界（重要）
+
+当前模块布局、入口和旧资源路径兼容方式见 [modules/README.md](modules/README.md)。
 
 本目录属于 **Agent sidebar 线**。为与并行的 jsvmp 线零冲突，**本线不修改**：
 
@@ -26,9 +28,9 @@ trace 数据通过**只读契约**对接（A4 阶段），契约规格记录在 
 
 | 部件 | 状态 |
 |---|---|
-| `modules/LlmClient.sys.mjs` | ✅ DeepSeek live 验证通过（OpenAI 兼容，deepseek/openai/custom） |
-| `modules/ConfigStore.sys.mjs` | ✅ Node 单测通过（prefs/内存双 backend） |
-| `modules/providers.sys.mjs` | ✅ 端到端 live 通过（ConfigStore→providers→LlmClient→DeepSeek） |
+| `modules/llm/LlmClient.sys.mjs` | ✅ DeepSeek live 验证通过（OpenAI 兼容，deepseek/openai/custom） |
+| `modules/providers/ConfigStore.sys.mjs` | ✅ Node 单测通过（prefs/内存双 backend） |
+| `modules/providers/providers.sys.mjs` | ✅ 端到端 live 通过（ConfigStore→providers→LlmClient→DeepSeek） |
 | `content/AgentPanel.jsx` + `SettingsPane.jsx` | ✅ esbuild 打包通过（jsx 语法已验证） |
 | `content/index.jsx` + `panel.html` + `agent-panel.css` | ✅ 挂载入口 + 容器 + 主题样式 |
 | `package.json` → `content/agent-sidebar.bundle.js` | ✅ 143.5kb minified |

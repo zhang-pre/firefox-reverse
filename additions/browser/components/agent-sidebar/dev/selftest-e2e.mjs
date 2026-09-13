@@ -4,8 +4,8 @@
  *   node dev/selftest-e2e.mjs                          # dry-run
  *   DEEPSEEK_API_KEY=sk-xxx node dev/selftest-e2e.mjs --live
  */
-import { ConfigStore } from "../modules/ConfigStore.sys.mjs";
-import { buildClientFromStore } from "../modules/providers.sys.mjs";
+import { ConfigStore } from "../modules/providers/ConfigStore.sys.mjs";
+import { buildClientFromStore } from "../modules/providers/providers.sys.mjs";
 
 const live = process.argv.includes("--live");
 

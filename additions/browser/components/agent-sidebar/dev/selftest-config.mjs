@@ -2,11 +2,11 @@
  *   node dev/selftest-config.mjs
  * 不随 omni.ja 打包。
  */
-import { ConfigStore } from "../modules/ConfigStore.sys.mjs";
+import { ConfigStore } from "../modules/providers/ConfigStore.sys.mjs";
 import {
   normalizeReasoningEffort,
   REASONING_EFFORT_VALUES,
-} from "../modules/ReasoningEffort.sys.mjs";
+} from "../modules/llm/ReasoningEffort.sys.mjs";
 
 const cs = new ConfigStore();
 let fail = 0;

@@ -1,4 +1,4 @@
-import { createAgentRuntime } from "../modules/AgentRuntime.sys.mjs";
+import { createAgentRuntime } from "../modules/runtime/AgentRuntime.sys.mjs";
 
 let pass = 0;
 let fail = 0;

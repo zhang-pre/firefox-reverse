@@ -2,7 +2,7 @@
 import {
   AgentRuntimeCore,
   DEFAULT_RESERVATION_TTL_MS as RESERVE_TTL_MS,
-} from "../modules/AgentRuntimeCore.sys.mjs";
+} from "../modules/runtime/AgentRuntimeCore.sys.mjs";
 
 function makeStore() {
   let NOW = 0;

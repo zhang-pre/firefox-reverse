@@ -14,30 +14,30 @@ function loadModules() {
     throw new Error("ChromeUtils 不可用：agent-sidebar 须在 firefox-reverse 浏览器内运行");
   }
   const { configStore } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/ConfigStore.sys.mjs"
+    "resource:///modules/agentsidebar/providers/ConfigStore.sys.mjs"
   );
   const { buildClientFromStore, listProviders, isVisionModel, fetchModels } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/providers.sys.mjs"
+    "resource:///modules/agentsidebar/providers/providers.sys.mjs"
   );
   const { conversationStore } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/ConversationStore.sys.mjs"
+    "resource:///modules/agentsidebar/state/ConversationStore.sys.mjs"
   );
   // 能力后端 + 工具路由 + Agent 循环
   const { getBackends } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/Backends.sys.mjs"
+    "resource:///modules/agentsidebar/backends/Backends.sys.mjs"
   );
   const { ToolRouter } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/ToolRouter.sys.mjs"
+    "resource:///modules/agentsidebar/tools/ToolRouter.sys.mjs"
   );
   const { createBuiltinTools } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/Tools.sys.mjs"
+    "resource:///modules/agentsidebar/tools/Tools.sys.mjs"
   );
   const { runAgentTurn } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/AgentLoop.sys.mjs"
+    "resource:///modules/agentsidebar/runtime/AgentLoop.sys.mjs"
   );
   // 常驻后台对话引擎（跨侧栏面板重载存活）——UI 订阅它，切栏回来续看不丢。
   const { agentSession } = ChromeUtils.importESModule(
-    "resource:///modules/agentsidebar/AgentSession.sys.mjs"
+    "resource:///modules/agentsidebar/host/AgentSession.sys.mjs"
   );
   const backends = getBackends();
   const router = new ToolRouter();

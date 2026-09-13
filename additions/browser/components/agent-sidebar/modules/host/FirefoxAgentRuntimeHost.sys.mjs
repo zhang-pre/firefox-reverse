@@ -5,9 +5,9 @@
  * code depends on this narrow host object instead of importing Firefox APIs.
  */
 
-import { ToolRouter } from "./ToolRouter.sys.mjs";
-import { createBuiltinTools } from "./Tools.sys.mjs";
-import { getBackends } from "./Backends.sys.mjs";
+import { ToolRouter } from "../tools/ToolRouter.sys.mjs";
+import { createBuiltinTools } from "../tools/Tools.sys.mjs";
+import { getBackends } from "../backends/Backends.sys.mjs";
 
 const timers = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
 let sharedRouter = null;

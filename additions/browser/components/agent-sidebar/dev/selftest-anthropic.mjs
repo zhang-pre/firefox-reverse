@@ -2,7 +2,7 @@
  * 验证 OpenAI 形态消息 → Anthropic /v1/messages 的翻译 + 响应解析。
  *   node dev/selftest-anthropic.mjs
  */
-import { LlmClient, toAnthropicMessages } from "../modules/LlmClient.sys.mjs";
+import { LlmClient, toAnthropicMessages } from "../modules/llm/LlmClient.sys.mjs";
 
 let pass = 0,
   fail = 0;

@@ -272,7 +272,7 @@ function ensureActor() {
   try {
     ChromeUtils.registerWindowActor(ACTOR_NAME, {
       child: {
-        esModuleURI: "resource:///modules/agentsidebar/AgentEvalChild.sys.mjs",
+        esModuleURI: "resource:///modules/agentsidebar/backends/AgentEvalChild.sys.mjs",
       },
       allFrames: false,
     });

@@ -7,16 +7,16 @@ import {
   LlmClient,
   PROTOCOLS as facadeProtocols,
   toAnthropicMessages as facadeToAnthropicMessages,
-} from "../modules/LlmClient.sys.mjs";
+} from "../modules/llm/LlmClient.sys.mjs";
 import {
   buildLlmRequest,
   PROTOCOLS,
   toAnthropicMessages,
-} from "../modules/LlmProtocol.sys.mjs";
+} from "../modules/llm/LlmProtocol.sys.mjs";
 
 const readModule = name =>
   fs.readFileSync(
-    fileURLToPath(new URL(`../modules/${name}`, import.meta.url)),
+    fileURLToPath(new URL(`../modules/llm/${name}`, import.meta.url)),
     "utf8"
   );
 const sources = {

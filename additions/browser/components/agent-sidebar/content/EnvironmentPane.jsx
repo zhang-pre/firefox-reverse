@@ -582,7 +582,7 @@ export default function EnvironmentPane({ env, onClose }) {
     try {
       if (!currentProcessEnvRef.current) {
         const { EnvironmentBackend } = ChromeUtils.importESModule(
-          "resource:///modules/agentsidebar/EnvironmentBackendCurrent.sys.mjs"
+          "resource:///modules/agentsidebar/backends/EnvironmentBackendCurrent.sys.mjs"
         );
         currentProcessEnvRef.current = new EnvironmentBackend();
       }

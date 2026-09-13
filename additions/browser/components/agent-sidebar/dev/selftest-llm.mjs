@@ -7,7 +7,7 @@
  *
  * 这是开发期验证脚本，不随 omni.ja 打包（由 jar.mn 排除 dev/）。
  */
-import { LlmClient } from "../modules/LlmClient.sys.mjs";
+import { LlmClient } from "../modules/llm/LlmClient.sys.mjs";
 
 const args = process.argv.slice(2);
 const live = args.includes("--live");

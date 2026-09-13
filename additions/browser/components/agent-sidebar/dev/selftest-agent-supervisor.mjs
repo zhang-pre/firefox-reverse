@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { AgentSupervisor, inferDirectorTrigger } from "../modules/AgentSupervisor.sys.mjs";
+import { AgentSupervisor, inferDirectorTrigger } from "../modules/runtime/AgentSupervisor.sys.mjs";
 
 assert.equal(inferDirectorTrigger({ content: "phase: P2\ncandidate_complete: false" }), "stage_gate");
 assert.equal(inferDirectorTrigger({ content: "candidate_complete: true" }), "final_candidate");

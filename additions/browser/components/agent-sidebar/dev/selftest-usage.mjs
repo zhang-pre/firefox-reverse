@@ -2,7 +2,7 @@ import {
   cacheHitRate,
   mergeUsage,
   normalizeUsage,
-} from "../modules/Usage.sys.mjs";
+} from "../modules/llm/Usage.sys.mjs";
 
 let pass = 0;
 let fail = 0;

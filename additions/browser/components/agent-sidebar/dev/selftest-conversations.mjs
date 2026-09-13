@@ -1,7 +1,7 @@
 /* dev/selftest-conversations.mjs — ConversationStore（内存 backend）逻辑自测。
  *   node dev/selftest-conversations.mjs
  */
-import { ConversationStore } from "../modules/ConversationStore.sys.mjs";
+import { ConversationStore } from "../modules/state/ConversationStore.sys.mjs";
 
 let pass = 0, fail = 0;
 const ok = (c, m) => (c ? (pass++, console.log("  ✓", m)) : (fail++, console.error("  ✗ FAIL:", m)));

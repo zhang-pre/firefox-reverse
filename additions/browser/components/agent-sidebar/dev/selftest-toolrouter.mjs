@@ -3,9 +3,9 @@
  *
  *   node dev/selftest-toolrouter.mjs
  */
-import { ToolRouter } from "../modules/ToolRouter.sys.mjs";
-import { createBuiltinTools } from "../modules/Tools.sys.mjs";
-import { runAgentTurn } from "../modules/AgentLoop.sys.mjs";
+import { ToolRouter } from "../modules/tools/ToolRouter.sys.mjs";
+import { createBuiltinTools } from "../modules/tools/Tools.sys.mjs";
+import { runAgentTurn } from "../modules/runtime/AgentLoop.sys.mjs";
 
 let pass = 0,
   fail = 0;

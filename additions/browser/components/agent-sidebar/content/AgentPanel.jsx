@@ -7,8 +7,8 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
  * 使本组件保持纯 UI、可独立打包。
  *
  * @param {object} props
- * @param {() => import("../modules/LlmClient.sys.mjs").LlmClient} props.buildClient
- * @param {import("../modules/ConversationStore.sys.mjs").ConversationStore} props.conversations
+ * @param {() => import("../modules/llm/LlmClient.sys.mjs").LlmClient} props.buildClient
+ * @param {import("../modules/state/ConversationStore.sys.mjs").ConversationStore} props.conversations
  * @param {() => void} [props.onOpenEnvironment]
  * @param {() => void} [props.onOpenSettings]
  */

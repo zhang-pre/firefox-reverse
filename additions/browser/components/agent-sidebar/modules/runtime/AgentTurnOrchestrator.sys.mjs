@@ -19,8 +19,8 @@ import {
   CONTEXT_PROJECTION_PROMPT,
   CONTEXT_PROJECTION_VERSION,
   planContextProjection,
-} from "./ContextProjection.sys.mjs";
-import { emptyUsage, mergeUsage, normalizeUsage } from "./Usage.sys.mjs";
+} from "../state/ContextProjection.sys.mjs";
+import { emptyUsage, mergeUsage, normalizeUsage } from "../llm/Usage.sys.mjs";
 
 const CANCELLED_TURN_BOUNDARY =
   "【手动取消边界】上一项任务已被用户明确手动取消。此前未完成事项只能作为历史背景，" +

@@ -20,7 +20,7 @@ import { NotesBackend } from "./NotesBackend.sys.mjs";
 import { LedgerBackend } from "./LedgerBackend.sys.mjs";
 import { SkillBackend } from "./SkillBackend.sys.mjs";
 import { EnvironmentBackend } from "./EnvironmentBackend.sys.mjs";
-import { configStore } from "./ConfigStore.sys.mjs";
+import { configStore } from "../providers/ConfigStore.sys.mjs";
 
 let _singleton = null;
 

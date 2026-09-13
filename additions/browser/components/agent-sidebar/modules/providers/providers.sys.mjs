@@ -4,8 +4,8 @@
  * anthropic / gemini 留 A2。React 面板用 listProviders() 渲染下拉，用
  * buildClientFromStore() 在发送时构造 LlmClient。
  */
-import { LlmClient } from "./LlmClient.sys.mjs";
-import { normalizeReasoningEffort } from "./ReasoningEffort.sys.mjs";
+import { LlmClient } from "../llm/LlmClient.sys.mjs";
+import { normalizeReasoningEffort } from "../llm/ReasoningEffort.sys.mjs";
 
 /** 内置 Claude 模型（Anthropic 协议自定义端点用；中转站 /v1/models 往往列不出 Claude）。
  *  首项为默认。如需别的版本，设置里仍可「手动输入」。 */

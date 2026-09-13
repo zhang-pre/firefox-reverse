@@ -9,8 +9,8 @@ import {
   normalizeBaseUrl,
   resolveChatPath,
   buildClientFromStore,
-} from "../modules/providers.sys.mjs";
-import { ConfigStore } from "../modules/ConfigStore.sys.mjs";
+} from "../modules/providers/providers.sys.mjs";
+import { ConfigStore } from "../modules/providers/ConfigStore.sys.mjs";
 
 let fail = 0;
 function check(name, got, want) {

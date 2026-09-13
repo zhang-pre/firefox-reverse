@@ -2,44 +2,102 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-# 注册到 resource:///modules/agentsidebar/<name>.sys.mjs
+# Implementations retain their source subdirectories in resource:///modules/agentsidebar/.
+EXTRA_JS_MODULES.agentsidebar.backends += [
+    "modules/backends/AddonBackend.sys.mjs",
+    "modules/backends/AgentEvalChild.sys.mjs",
+    "modules/backends/Backends.sys.mjs",
+    "modules/backends/CodeBackend.sys.mjs",
+    "modules/backends/EnvironmentBackend.sys.mjs",
+    "modules/backends/EnvironmentBackendCurrent.sys.mjs",
+    "modules/backends/JsvmpBackend.sys.mjs",
+    "modules/backends/LedgerBackend.sys.mjs",
+    "modules/backends/NetworkBackend.sys.mjs",
+    "modules/backends/NotesBackend.sys.mjs",
+    "modules/backends/PageBackend.sys.mjs",
+    "modules/backends/ScriptsBackend.sys.mjs",
+    "modules/backends/SkillBackend.sys.mjs",
+    "modules/backends/WebApiBackend.sys.mjs",
+    "modules/backends/WorkspaceBackend.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.host += [
+    "modules/host/AgentSession.sys.mjs",
+    "modules/host/FirefoxAgentRuntimeHost.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.llm += [
+    "modules/llm/LlmClient.sys.mjs",
+    "modules/llm/LlmProtocol.sys.mjs",
+    "modules/llm/LlmRequestExecutor.sys.mjs",
+    "modules/llm/LlmStreamParser.sys.mjs",
+    "modules/llm/LlmTransport.sys.mjs",
+    "modules/llm/ReasoningEffort.sys.mjs",
+    "modules/llm/Usage.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.providers += [
+    "modules/providers/ConfigStore.sys.mjs",
+    "modules/providers/providers.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.runtime += [
+    "modules/runtime/AgentLoop.sys.mjs",
+    "modules/runtime/AgentRuntime.sys.mjs",
+    "modules/runtime/AgentRuntimeCore.sys.mjs",
+    "modules/runtime/AgentRuntimePorts.sys.mjs",
+    "modules/runtime/AgentSupervisor.sys.mjs",
+    "modules/runtime/AgentTurnOrchestrator.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.state += [
+    "modules/state/ContextProjection.sys.mjs",
+    "modules/state/ConversationStore.sys.mjs",
+]
+
+EXTRA_JS_MODULES.agentsidebar.tools += [
+    "modules/tools/ToolRouter.sys.mjs",
+    "modules/tools/Tools.sys.mjs",
+]
+
+# Flat legacy URLs forward to the same implementations (UI/MCP compatibility).
 EXTRA_JS_MODULES.agentsidebar += [
-    "modules/AddonBackend.sys.mjs",
-    "modules/AgentEvalChild.sys.mjs",
-    "modules/AgentLoop.sys.mjs",
-    "modules/AgentRuntime.sys.mjs",
-    "modules/AgentRuntimeCore.sys.mjs",
-    "modules/AgentRuntimePorts.sys.mjs",
-    "modules/AgentSession.sys.mjs",
-    "modules/AgentSupervisor.sys.mjs",
-    "modules/AgentTurnOrchestrator.sys.mjs",
-    "modules/Backends.sys.mjs",
-    "modules/CodeBackend.sys.mjs",
-    "modules/ConfigStore.sys.mjs",
-    "modules/ContextProjection.sys.mjs",
-    "modules/ConversationStore.sys.mjs",
-    "modules/EnvironmentBackend.sys.mjs",
-    "modules/EnvironmentBackendCurrent.sys.mjs",
-    "modules/FirefoxAgentRuntimeHost.sys.mjs",
-    "modules/JsvmpBackend.sys.mjs",
-    "modules/LedgerBackend.sys.mjs",
-    "modules/LlmClient.sys.mjs",
-    "modules/LlmProtocol.sys.mjs",
-    "modules/LlmRequestExecutor.sys.mjs",
-    "modules/LlmStreamParser.sys.mjs",
-    "modules/LlmTransport.sys.mjs",
-    "modules/NetworkBackend.sys.mjs",
-    "modules/NotesBackend.sys.mjs",
-    "modules/PageBackend.sys.mjs",
-    "modules/providers.sys.mjs",
-    "modules/ReasoningEffort.sys.mjs",
-    "modules/ScriptsBackend.sys.mjs",
-    "modules/SkillBackend.sys.mjs",
-    "modules/ToolRouter.sys.mjs",
-    "modules/Tools.sys.mjs",
-    "modules/Usage.sys.mjs",
-    "modules/WebApiBackend.sys.mjs",
-    "modules/WorkspaceBackend.sys.mjs",
+    "modules/compat/AddonBackend.sys.mjs",
+    "modules/compat/AgentEvalChild.sys.mjs",
+    "modules/compat/AgentLoop.sys.mjs",
+    "modules/compat/AgentRuntime.sys.mjs",
+    "modules/compat/AgentRuntimeCore.sys.mjs",
+    "modules/compat/AgentRuntimePorts.sys.mjs",
+    "modules/compat/AgentSession.sys.mjs",
+    "modules/compat/AgentSupervisor.sys.mjs",
+    "modules/compat/AgentTurnOrchestrator.sys.mjs",
+    "modules/compat/Backends.sys.mjs",
+    "modules/compat/CodeBackend.sys.mjs",
+    "modules/compat/ConfigStore.sys.mjs",
+    "modules/compat/ContextProjection.sys.mjs",
+    "modules/compat/ConversationStore.sys.mjs",
+    "modules/compat/EnvironmentBackend.sys.mjs",
+    "modules/compat/EnvironmentBackendCurrent.sys.mjs",
+    "modules/compat/FirefoxAgentRuntimeHost.sys.mjs",
+    "modules/compat/JsvmpBackend.sys.mjs",
+    "modules/compat/LedgerBackend.sys.mjs",
+    "modules/compat/LlmClient.sys.mjs",
+    "modules/compat/LlmProtocol.sys.mjs",
+    "modules/compat/LlmRequestExecutor.sys.mjs",
+    "modules/compat/LlmStreamParser.sys.mjs",
+    "modules/compat/LlmTransport.sys.mjs",
+    "modules/compat/NetworkBackend.sys.mjs",
+    "modules/compat/NotesBackend.sys.mjs",
+    "modules/compat/PageBackend.sys.mjs",
+    "modules/compat/providers.sys.mjs",
+    "modules/compat/ReasoningEffort.sys.mjs",
+    "modules/compat/ScriptsBackend.sys.mjs",
+    "modules/compat/SkillBackend.sys.mjs",
+    "modules/compat/ToolRouter.sys.mjs",
+    "modules/compat/Tools.sys.mjs",
+    "modules/compat/Usage.sys.mjs",
+    "modules/compat/WebApiBackend.sys.mjs",
+    "modules/compat/WorkspaceBackend.sys.mjs",
 ]
 
 DIRS += ["preferences"]

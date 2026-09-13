@@ -1,7 +1,7 @@
 /* dev/selftest-retry.mjs — LlmClient 瞬时错误重试自测（Node，mock fetch，无网络）。
  *   node dev/selftest-retry.mjs
  */
-import { LlmClient } from "../modules/LlmClient.sys.mjs";
+import { LlmClient } from "../modules/llm/LlmClient.sys.mjs";
 
 let pass = 0,
   fail = 0;

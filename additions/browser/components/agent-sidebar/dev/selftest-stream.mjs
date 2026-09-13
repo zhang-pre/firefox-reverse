@@ -1,7 +1,7 @@
 /* dev/selftest-stream.mjs — LlmClient._readStream SSE 解析自测（mock 流，无需 key/网络）。
  *   node dev/selftest-stream.mjs
  */
-import { LlmClient } from "../modules/LlmClient.sys.mjs";
+import { LlmClient } from "../modules/llm/LlmClient.sys.mjs";
 
 let pass = 0, fail = 0;
 const ok = (c, m) => (c ? (pass++, console.log("  ✓", m)) : (fail++, console.error("  ✗ FAIL:", m)));

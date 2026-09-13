@@ -5,7 +5,7 @@ import {
   normalizeContextProjection,
   planContextProjection,
   projectMessages,
-} from "../modules/ContextProjection.sys.mjs";
+} from "../modules/state/ContextProjection.sys.mjs";
 
 let pass = 0;
 let fail = 0;

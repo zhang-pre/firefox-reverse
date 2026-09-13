@@ -11,7 +11,7 @@
  */
 
 import { normalizeContextProjection, projectMessages } from "./ContextProjection.sys.mjs";
-import { emptyUsage, mergeUsage } from "./Usage.sys.mjs";
+import { emptyUsage, mergeUsage } from "../llm/Usage.sys.mjs";
 
 const DIR_NAME = "firefox-reverse-agent";
 const FILE_NAME = "conversations.json";

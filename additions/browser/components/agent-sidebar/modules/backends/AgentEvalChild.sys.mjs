@@ -986,7 +986,7 @@ export class AgentEvalChild extends JSWindowActorChild {
     try {
       const sandbox = Cu.Sandbox(win, { sandboxPrototype: win, wantXrays: false });
       // 第 4 参 filename="page_eval-expression"：让**你表达式里代码**的报错栈挂在 `@page_eval-expression:行:列`，
-      // 而不是默认挂到本模块 URL（`@resource:///modules/agentsidebar/AgentEvalChild.sys.mjs`）——否则你手写的
+      // 而不是默认挂到本模块 URL（`@resource:///modules/agentsidebar/backends/AgentEvalChild.sys.mjs`）——否则你手写的
       // MD5 等抛 "X is not a function" 时，栈看着像"工具内部出错"，会被误判成 page_eval 工具 bug（实为你表达式的 bug）。
       let result = Cu.evalInSandbox(`(function(){ return (${expression}); })()`, sandbox, undefined, "page_eval-expression", 1);
       if (awaitPromise && result && typeof result.then === "function") {

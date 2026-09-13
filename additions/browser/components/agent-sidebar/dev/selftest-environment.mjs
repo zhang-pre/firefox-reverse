@@ -80,7 +80,7 @@ Object.defineProperty(globalThis, "devicePixelRatio", {
 });
 
 try {
-  const { EnvironmentBackend } = await import("../modules/EnvironmentBackend.sys.mjs");
+  const { EnvironmentBackend } = await import("../modules/backends/EnvironmentBackend.sys.mjs");
   const backend = new EnvironmentBackend({ root });
 
   const created = await backend.create({ name: "Selftest" });

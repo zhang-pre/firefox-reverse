@@ -35,7 +35,7 @@ globalThis.PathUtils = globalThis.PathUtils || {
   },
 };
 
-const { WorkspaceBackend } = await import("../modules/WorkspaceBackend.sys.mjs");
+const { WorkspaceBackend } = await import("../modules/backends/WorkspaceBackend.sys.mjs");
 
 let pass = 0;
 let fail = 0;

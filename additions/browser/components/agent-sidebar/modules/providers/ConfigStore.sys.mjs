@@ -9,7 +9,7 @@
  * LoginManager 加密存储留后续增强。
  */
 
-import { normalizeReasoningEffort } from "./ReasoningEffort.sys.mjs";
+import { normalizeReasoningEffort } from "../llm/ReasoningEffort.sys.mjs";
 
 const PREF_PREFIX = "extensions.firefox-reverse.agent.";
 const MODEL_PROFILES_KEY = PREF_PREFIX + "modelProfiles.v1";

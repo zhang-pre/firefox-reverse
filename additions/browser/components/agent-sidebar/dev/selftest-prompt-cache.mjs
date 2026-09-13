@@ -1,4 +1,4 @@
-import { LlmClient } from "../modules/LlmClient.sys.mjs";
+import { LlmClient } from "../modules/llm/LlmClient.sys.mjs";
 
 let pass = 0;
 let fail = 0;

@@ -112,10 +112,10 @@ def validate(report, output):
         assert ini["App"]["BuildID"] == build_id
         assert ini["App"]["SourceStamp"] == commit
         expected_ledger = subprocess.check_output([
-            "git", "show", f"{commit}:additions/browser/components/agent-sidebar/modules/LedgerBackend.sys.mjs"
+            "git", "show", f"{commit}:additions/browser/components/agent-sidebar/modules/backends/LedgerBackend.sys.mjs"
         ])
         with zipfile.ZipFile(root / "browser/omni.ja") as archive:
-            assert archive.read("modules/agentsidebar/LedgerBackend.sys.mjs") == expected_ledger
+            assert archive.read("modules/agentsidebar/backends/LedgerBackend.sys.mjs") == expected_ledger
             assert "右击或下拉显示历史" in archive.read("localization/zh-CN/browser/browserContext.ftl").decode()
 
         profile = work / "screenshot-profile"
@@ -169,7 +169,7 @@ def validate(report, output):
                     "script": """
                     const done=arguments[arguments.length-1];
                     (async()=>{
-                      const {LedgerBackend,ledgerScopeSql}=ChromeUtils.importESModule('resource:///modules/agentsidebar/LedgerBackend.sys.mjs');
+                      const {LedgerBackend,ledgerScopeSql}=ChromeUtils.importESModule('resource:///modules/agentsidebar/backends/LedgerBackend.sys.mjs');
                       const ledger=new LedgerBackend();
                       const workspace=PathUtils.join(PathUtils.profileDir,'native-ledger');
                       await IOUtils.makeDirectory(workspace);

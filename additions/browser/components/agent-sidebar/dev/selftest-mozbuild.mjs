@@ -1,5 +1,7 @@
 /* Verify the strict case-insensitive ordering required by Mozilla moz.build. */
 import fs from "node:fs";
+import assert from "node:assert/strict";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mozBuildPath = fileURLToPath(new URL("../moz.build", import.meta.url));
@@ -15,39 +17,113 @@ const buildRelinkPath = fileURLToPath(new URL("../../../../../scripts/force-buil
 const source = fs.readFileSync(mozBuildPath, "utf8");
 const localeMozBuild = fs.readFileSync(localeMozBuildPath, "utf8");
 const packageVersion = JSON.parse(fs.readFileSync(packagePath, "utf8")).version;
-const block = source.match(/EXTRA_JS_MODULES\.agentsidebar\s*\+=\s*\[([\s\S]*?)\n\]/);
-
-if (!block) {
-  console.error("FAIL: EXTRA_JS_MODULES.agentsidebar block not found");
-  process.exit(1);
-}
-
-const entries = [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-const sorted = [...entries].sort((left, right) => {
+const blocks = [...source.matchAll(/EXTRA_JS_MODULES\.agentsidebar((?:\.\w+)*)\s*\+=\s*\[([\s\S]*?)\n\]/g)];
+assert.ok(blocks.length, "moz.build must register Agent modules");
+const compare = (left, right) => {
   const a = left.toLowerCase();
   const b = right.toLowerCase();
   return a < b ? -1 : a > b ? 1 : 0;
-});
-
-if (JSON.stringify(entries) !== JSON.stringify(sorted)) {
-  console.error("FAIL: moz.build module list is not sorted");
-  console.error("expected:", sorted.join("\n"));
-  process.exit(1);
+};
+const entries = [];
+const installed = new Map();
+const resourceRoot = "resource:///modules/agentsidebar/";
+for (const [, suffix, body] of blocks) {
+  const groupEntries = [...body.matchAll(/"([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(groupEntries, [...groupEntries].sort(compare), "moz.build group must be sorted");
+  const destination = suffix.slice(1).replaceAll(".", "/");
+  for (const entry of groupEntries) {
+    const url = resourceRoot + (destination ? destination + "/" : "") + path.posix.basename(entry);
+    assert.equal(installed.has(url), false, "duplicate installed URL: " + url);
+    const expectedDir = "modules/" + (destination || "compat");
+    assert.equal(path.posix.dirname(entry), expectedDir, "source and packaged directory disagree");
+    installed.set(url, entry);
+    entries.push(entry);
+  }
 }
-
-const sourceModules = fs
-  .readdirSync(modulesPath)
-  .filter(name => name.endsWith(".sys.mjs"))
-  .map(name => `modules/${name}`)
-  .sort();
+function moduleFiles(directory, prefix = "modules") {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const relative = prefix + "/" + entry.name;
+    if (entry.isDirectory()) return moduleFiles(path.join(directory, entry.name), relative);
+    return entry.name.endsWith(".sys.mjs") ? [relative] : [];
+  });
+}
+const sourceModules = moduleFiles(modulesPath).sort();
 const registeredModules = [...entries].sort();
 if (JSON.stringify(sourceModules) !== JSON.stringify(registeredModules)) {
   const missing = sourceModules.filter(name => !registeredModules.includes(name));
   const stale = registeredModules.filter(name => !sourceModules.includes(name));
-  console.error("FAIL: moz.build does not exactly match modules/*.sys.mjs");
+  console.error("FAIL: moz.build does not exactly match modules/**/*.sys.mjs");
   if (missing.length) console.error("unregistered:", missing.join(", "));
   if (stale.length) console.error("missing source:", stale.join(", "));
   process.exit(1);
+}
+
+// Resolve imports against the *installed* URL graph. Merely checking source
+// imports would miss moz.build accidentally flattening a nested directory.
+const sidebarPath = path.dirname(modulesPath);
+for (const [url, entry] of installed) {
+  const moduleSource = fs.readFileSync(path.join(sidebarPath, entry), "utf8");
+  const references = [...moduleSource.matchAll(/["']((?:\.{1,2}\/|resource:\/\/\/modules\/agentsidebar\/)[^"'\s]+\.sys\.mjs)["']/g)];
+  for (const [, specifier] of references) {
+    const resolved = new URL(specifier, url).href;
+    assert.ok(installed.has(resolved), url + " imports missing " + resolved);
+  }
+  if (entry.startsWith("modules/compat/")) {
+    const forward = moduleSource.match(/^export \* from "(resource:\/\/\/modules\/agentsidebar\/[^"]+)";$/m);
+    assert.ok(forward, "compatibility entry must re-export the implementation: " + entry);
+    assert.ok(installed.has(forward[1]), "missing compatibility target: " + entry);
+    assert.ok(!installed.get(forward[1]).startsWith("modules/compat/"), "compatibility entry must target an implementation");
+    assert.equal(path.posix.basename(forward[1]), path.posix.basename(entry));
+  }
+}
+// These URLs existed before the directory migration. New modules do not need
+// flat aliases unless they are deliberately exposed as legacy entry points.
+const legacyNames = [
+  "AddonBackend.sys.mjs",
+  "AgentEvalChild.sys.mjs",
+  "AgentLoop.sys.mjs",
+  "AgentRuntime.sys.mjs",
+  "AgentRuntimeCore.sys.mjs",
+  "AgentRuntimePorts.sys.mjs",
+  "AgentSession.sys.mjs",
+  "AgentSupervisor.sys.mjs",
+  "AgentTurnOrchestrator.sys.mjs",
+  "Backends.sys.mjs",
+  "CodeBackend.sys.mjs",
+  "ConfigStore.sys.mjs",
+  "ContextProjection.sys.mjs",
+  "ConversationStore.sys.mjs",
+  "EnvironmentBackend.sys.mjs",
+  "EnvironmentBackendCurrent.sys.mjs",
+  "FirefoxAgentRuntimeHost.sys.mjs",
+  "JsvmpBackend.sys.mjs",
+  "LedgerBackend.sys.mjs",
+  "LlmClient.sys.mjs",
+  "LlmProtocol.sys.mjs",
+  "LlmRequestExecutor.sys.mjs",
+  "LlmStreamParser.sys.mjs",
+  "LlmTransport.sys.mjs",
+  "NetworkBackend.sys.mjs",
+  "NotesBackend.sys.mjs",
+  "PageBackend.sys.mjs",
+  "ReasoningEffort.sys.mjs",
+  "ScriptsBackend.sys.mjs",
+  "SkillBackend.sys.mjs",
+  "ToolRouter.sys.mjs",
+  "Tools.sys.mjs",
+  "Usage.sys.mjs",
+  "WebApiBackend.sys.mjs",
+  "WorkspaceBackend.sys.mjs",
+  "providers.sys.mjs",
+];
+for (const name of legacyNames) {
+  assert.equal(installed.get(resourceRoot + name), "modules/compat/" + name, "missing legacy URL: " + name);
+}
+for (const name of ["index.jsx", "AgentPanel.jsx", "EnvironmentPane.jsx"]) {
+  const uiSource = fs.readFileSync(path.join(sidebarPath, "content", name), "utf8");
+  for (const [url] of uiSource.matchAll(/resource:\/\/\/modules\/agentsidebar\/[A-Za-z/]+\.sys\.mjs/g)) {
+    assert.ok(installed.has(url), name + " imports missing " + url);
+  }
 }
 
 if (!source.includes('DIRS += ["preferences"]')) {

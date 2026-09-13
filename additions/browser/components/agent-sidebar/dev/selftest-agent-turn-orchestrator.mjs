@@ -1,12 +1,12 @@
-import { AgentRuntimeCore } from "../modules/AgentRuntimeCore.sys.mjs";
-import { defineAgentRuntimePorts } from "../modules/AgentRuntimePorts.sys.mjs";
-import { AgentTurnOrchestrator } from "../modules/AgentTurnOrchestrator.sys.mjs";
+import { AgentRuntimeCore } from "../modules/runtime/AgentRuntimeCore.sys.mjs";
+import { defineAgentRuntimePorts } from "../modules/runtime/AgentRuntimePorts.sys.mjs";
+import { AgentTurnOrchestrator } from "../modules/runtime/AgentTurnOrchestrator.sys.mjs";
 import {
   buildEvidencePacket,
   inferDirectorTrigger,
   parseDirectorDecision,
-} from "../modules/AgentSupervisor.sys.mjs";
-import { emptyUsage } from "../modules/Usage.sys.mjs";
+} from "../modules/runtime/AgentSupervisor.sys.mjs";
+import { emptyUsage } from "../modules/llm/Usage.sys.mjs";
 
 let pass = 0;
 let fail = 0;

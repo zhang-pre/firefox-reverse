@@ -11,7 +11,7 @@
 - `docs/architecture.md` 已确定补丁集模式、`additions/` 放新增文件、`settings/*.json` 做运行时配置、C++ 优先。
 - `docs/features.md` 已列出 fingerprint/proxy/network/cookie/property trace 等模块，其中 fingerprint 目标覆盖 `navigator`、`screen`、canvas、WebGL、Audio、WebRTC、timezone、locale、fonts。
 - `settings/fingerprint.example.json` 是单环境指纹配置雏形。
-- `additions/browser/components/agent-sidebar/modules/WebApiBackend.sys.mjs` 已有 C++ Web-API trace 控制与查询，可以复用为“看目标读了哪些环境项”的验证工具。
+- `additions/browser/components/agent-sidebar/modules/backends/WebApiBackend.sys.mjs` 已有 C++ Web-API trace 控制与查询，可以复用为“看目标读了哪些环境项”的验证工具。
 - `ToolRouter`/`Backends` 已经适合新增 `env_*` 工具并暴露给侧边栏 Agent 或未来 MCP。
 
 缺口是：现在没有“环境实体”，只有单个配置文件；没有 profile 目录生命周期；trace 仍偏全局临时目录；C++ 指纹覆盖还没有统一配置服务。
@@ -89,15 +89,15 @@ C++ 层负责真实返回值：`navigator.*`、`screen.*`、canvas/WebGL/Audio/I
 新增：
 
 ```text
-additions/browser/components/agent-sidebar/modules/EnvironmentBackend.sys.mjs
+additions/browser/components/agent-sidebar/modules/backends/EnvironmentBackend.sys.mjs
 additions/browser/components/agent-sidebar/modules/FingerprintCaptureBackend.sys.mjs
 ```
 
 接入：
 
 ```text
-additions/browser/components/agent-sidebar/modules/Backends.sys.mjs
-additions/browser/components/agent-sidebar/modules/Tools.sys.mjs
+additions/browser/components/agent-sidebar/modules/backends/Backends.sys.mjs
+additions/browser/components/agent-sidebar/modules/tools/Tools.sys.mjs
 additions/browser/components/agent-sidebar/content/EnvironmentPane.jsx
 ```
 
