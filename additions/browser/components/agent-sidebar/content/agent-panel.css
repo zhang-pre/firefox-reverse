@@ -602,7 +602,8 @@ body {
 .agent-panel__input textarea {
   flex: 1;
   min-width: 0;
-  resize: none;
+  resize: vertical;
+  max-height: min(40vh, 320px);
   font: inherit;
   padding: 9px 11px;
   border-radius: var(--frx-radius-md);
