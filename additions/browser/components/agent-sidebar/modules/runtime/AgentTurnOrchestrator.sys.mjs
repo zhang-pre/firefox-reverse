@@ -120,9 +120,22 @@ export class AgentTurnOrchestrator {
       state.abort = context.abortController;
       this.runtimeCore.notify(state);
       await this._prepare(context);
-      const result = await this._runUntilTerminal(context);
+      let result;
+      for (;;) {
+        result = await this._runUntilTerminal(context);
+        if (!this.runtimeCore.hasSteering(state)) break;
+        context.turnMessages = (result?.messages || context.turnMessages).filter(
+          message => message && message.role !== "system"
+        );
+        if (result?.content) {
+          context.turnMessages.push({ role: "assistant", content: result.content });
+        }
+      }
+      // Close admission synchronously before any terminal persistence awaits.
+      this.runtimeCore.closeSteering(state);
       await this._complete(context, result);
     } catch (error) {
+      this.runtimeCore.closeSteering(state);
       await this._fail(context, error);
     } finally {
       await this._persistUsage(context);
@@ -422,6 +435,12 @@ export class AgentTurnOrchestrator {
         reviewIndex,
         previousDecision: context.previousDirectorDecision,
       });
+      if (this.runtimeCore.hasSteering(context.state)) return result;
+      const appliedSteering = context.state.steering.filter(item => item.status === "applied");
+      packet.userSteering = {
+        omittedEarlier: Math.max(0, appliedSteering.length - 4),
+        messages: appliedSteering.slice(-4).map(({ id, content }) => ({ id, content })),
+      };
       packet.retryBudget = { consecutiveFailures: stalledReviews, limit: 3 };
       packet.recentReviews = recentReviews.slice(-3);
 
@@ -436,6 +455,9 @@ export class AgentTurnOrchestrator {
         client: context.directorClient,
         packet,
         executeTool: async (name, args) => {
+          if (this.runtimeCore.hasSteering(context.state)) {
+            throw new Error("用户已追加指令，旧方向验收暂停，等待 Worker 处理");
+          }
           if (!context.workspaceRoot) {
             throw new Error("Director 验收需要当前会话绑定工作目录");
           }
@@ -452,6 +474,14 @@ export class AgentTurnOrchestrator {
           ),
       });
       if (context.abortController.signal.aborted) return result;
+      if (this.runtimeCore.hasSteering(context.state)) {
+        this.runtimeCore.applyEvent(context.state, {
+          type: "director_decision", reviewIndex, trigger: packet.trigger,
+          decision: { action: "redirect", finalAccepted: false, reason: "收到用户引导，旧审阅不再决定任务终态", instruction: "先处理用户追加指令" },
+        });
+        this.runtimeCore.notify(context.state);
+        return result;
+      }
       const continuing = decision.action === "continue" || decision.action === "redirect";
       if (continuing) {
         const hasSuccessfulCall = (result.toolCalls || []).some(call => {
@@ -591,6 +621,8 @@ export class AgentTurnOrchestrator {
       maxRounds,
       maxPerTool,
       signal: abortController.signal,
+      hasSteering: () => this.runtimeCore.hasSteering(state),
+      consumeSteering: () => this._consumeSteering(context),
       toolCtx: toolContext,
       getLedger: async () => {
         try {
@@ -640,7 +672,32 @@ export class AgentTurnOrchestrator {
     };
   }
 
+  async _consumeSteering(context) {
+    const { state, threadId } = context;
+    const items = this.runtimeCore.takeSteering(state);
+    if (!items.length) return [];
+    if (state.steps.length) {
+      await this._persist(threadId, textFromSteps(state.steps), state.steps);
+      this._startNextSegment(state);
+    }
+    const messages = [];
+    for (const item of items) {
+      if (context.abortController.signal.aborted) break;
+      const message = { role: "user", content: item.content };
+      await this.conversationStore.appendMessage(threadId, message);
+      item.status = context.abortController.signal.aborted ? "cancelled" : "applied";
+      if (item.status === "applied") {
+        messages.push(message);
+        context.objective += "\n\n【用户运行中追加指令】\n" + item.content;
+      }
+    }
+    state.checkpointSeq++;
+    this.runtimeCore.notify(state);
+    return messages;
+  }
+
   _requestConfirmation(state, call) {
+    if (this.runtimeCore.hasSteering(state) || state.aborted) return Promise.resolve(false);
     if (state.approveAll) {
       return Promise.resolve(true);
     }

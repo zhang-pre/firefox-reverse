@@ -541,6 +541,13 @@ body {
   background: color-mix(in srgb, var(--frx-tool-ok) 10%, transparent);
 }
 .agent-panel__notice span { flex: 1; }
+.agent-panel__steering {
+  flex: none;
+  display: block;
+  max-height: 100px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
 .agent-panel__notice button {
   flex: none;
   width: 22px;
@@ -594,6 +601,7 @@ body {
 
 .agent-panel__input textarea {
   flex: 1;
+  min-width: 0;
   resize: none;
   font: inherit;
   padding: 9px 11px;

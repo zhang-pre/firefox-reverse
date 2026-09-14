@@ -523,6 +523,8 @@ export async function runAgentTurn(p) {
     onEvent,
     onDelta,
     onReasoning, // 思考型模型的 reasoning_content 增量回调（供 UI 展示"思考过程"）
+    hasSteering = () => false,
+    consumeSteering,
     onCheckpoint, // 上下文压缩时回调(summary)：引擎据此把进展落盘成一条可见回复 + 重置实时步骤
     onUsage, // (rawUsage, {phase})：统一统计由上层按 provider 规范化并持久化
     persistToolArtifact, // 大工具结果落工作目录；返回 {path}，上下文只保留头尾与引用
@@ -618,7 +620,7 @@ export async function runAgentTurn(p) {
       break;
     }
   }
-  const rawTaskAnchor = taskIndex >= 0 ? history[taskIndex] : null;
+  let rawTaskAnchor = taskIndex >= 0 ? history[taskIndex] : null;
   let taskAnchor = _withRuntimeContext(
     rawTaskAnchor,
     _runtimeContext(dynamicContext, ledgerText)
@@ -654,6 +656,22 @@ export async function runAgentTurn(p) {
   const NO_PROGRESS_BUDGET = 12; // 配合 _isProgress 修正(失败的 run_node 不再误计为前进)：这下能真累计了，稍早一点提醒换路线
   let forcedDecisionPending = false; // 已注入强制决策提示、等模型给出"切换/继续(带证据)/阻塞报告"
 
+  async function applySteering() {
+    if (signal?.aborted || typeof consumeSteering !== "function") return false;
+    const incoming = await consumeSteering();
+    if (signal?.aborted || !incoming?.length) return false;
+    msgs.push(...incoming.map(sanitize));
+    // Preserve exact user corrections when the working history is compacted.
+    rawTaskAnchor = {
+      role: "user",
+      content: String(rawTaskAnchor?.content || "") +
+        incoming.map(message => "\n\n【用户运行中追加指令】\n" + message.content).join(""),
+    };
+    autoContinues = 0;
+    truncRetries = 0;
+    return true;
+  }
+
   for (let round = 1; round <= maxRounds; round++) {
     // 手动停止（侧边栏「停止」按钮 abort）：在轮次边界干净退出，返回已有进展。
     if (signal && signal.aborted) {
@@ -666,6 +684,9 @@ export async function runAgentTurn(p) {
         stopReason: "aborted",
       };
     }
+
+    await applySteering();
+    if (signal?.aborted) break;
 
     // ── 主动上下文压缩（先于 chat 调用）──────────────────────────────────
     // 工作上下文超阈值 → 把本回合进展折成 checkpoint（可见回复+落盘）→ 用小上下文续跑。
@@ -737,6 +758,8 @@ export async function runAgentTurn(p) {
       }
     }
 
+    await applySteering();
+    if (signal?.aborted) break;
     emit({ type: "round", round });
     const res = await client.chat(trimContext(msgs, maxChars), {
       tools,
@@ -752,6 +775,12 @@ export async function runAgentTurn(p) {
     }
 
     const toolCalls = res.toolCalls || [];
+    if (toolCalls.length === 0 && hasSteering() && !signal?.aborted) {
+      msgs.push({ role: "assistant", content: res.content || "" });
+      await applySteering();
+      continue;
+    }
+    if (signal?.aborted) break;
     if (toolCalls.length === 0) {
       // 模型没调工具就回了。可能 ①真完成 ②真要用户输入 ③只是"复述计划/进展"漂走了没动手
       // （尤其压缩后 [任务+存档+继续提示] 很容易引出一段纯文字回复）。③ 会让自主执行**过早结束**
@@ -859,6 +888,19 @@ export async function runAgentTurn(p) {
       if (signal && signal.aborted) {
         break; // 手动停止：跳出，外层轮次边界会干净返回
       }
+      if (hasSteering()) {
+        // Finish the protocol batch before inserting any new user messages.
+        const remaining = toolCalls.slice(toolCalls.indexOf(tc));
+        for (const skipped of remaining) {
+          const name = skipped.function?.name;
+          const env = { ok: false, skipped: true, error: "Skipped: new user steering supersedes this pending tool call" };
+          msgs.push({ role: "tool", tool_call_id: skipped.id, content: JSON.stringify(env) });
+          allToolCalls.push({ name, args: {}, env, id: skipped.id });
+          emit({ type: "tool_call", name, args: {}, id: skipped.id });
+          emit({ type: "tool_result", name, env, id: skipped.id });
+        }
+        break;
+      }
       const name = tc.function?.name;
       let args = {};
       let parseErr = null;
@@ -913,6 +955,7 @@ export async function runAgentTurn(p) {
           approved = await confirm({ name, args, id: tc.id });
         }
         emit({ type: "confirm_result", name, id: tc.id, approved: !!approved });
+        approved = approved && !signal?.aborted && !hasSteering();
         env = approved
           ? await router.dispatch(name, args, toolCtx)
           : { ok: false, error: "user denied tool execution", denied: true };
@@ -1047,6 +1090,13 @@ export async function runAgentTurn(p) {
     }
   }
 
+  if (signal?.aborted || hasSteering()) {
+    return {
+      content: signal?.aborted ? "（已手动停止）" : "",
+      rounds: maxRounds, toolCalls: allToolCalls, messages: msgs,
+      stopReason: signal?.aborted ? "aborted" : "max_rounds",
+    };
+  }
   emit({ type: "max_rounds", maxRounds });
   // 轮数用尽：不带工具再问一次，逼模型基于已有工具结果直接给结论，而不是空停。
   let summary = "";

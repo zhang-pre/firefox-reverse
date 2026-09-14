@@ -151,6 +151,11 @@ export function createAgentRuntime(inputPorts) {
       return runtimeCore.respondConfirm(threadId, id, approved, all);
     },
 
+    steer(threadId, content) {
+      ensureActive();
+      return runtimeCore.enqueueSteer(threadId, content);
+    },
+
     stop(threadId) {
       if (runtimeCore.abortThread(threadId)) {
         void ports.conversations

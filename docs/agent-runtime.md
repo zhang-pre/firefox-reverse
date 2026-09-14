@@ -56,6 +56,33 @@ AgentPanel
                                 -> final-only run_node/run_python callback
 ```
 
+## Steering the active run
+
+- Idle Send starts a run. During a run, the UI sends text through
+  `agentSession.steer(threadId, content)` and offers a separate Stop button.
+- `steer` synchronously returns `{ ok, id }` or `{ ok: false, error }`.
+  Acceptance means queued, not yet consumed. It never calls `run` or aborts.
+- AgentRuntimeCore owns a per-run FIFO with snapshot receipts:
+  `queued`, `applying`, `applied`, or `cancelled`. Up to 100 messages per run,
+  at most 16,000 characters each. Snapshots do not expose mutable queue entries.
+- AgentLoop reads the queue before requests and at response/tool boundaries.
+  An active request or tool finishes normally; remaining unstarted tool calls
+  get explicit skipped results before new user messages enter the model history.
+  Pending approval is declined, never automatically granted by steering.
+- Orchestrator persists consumed user messages and updates the Director objective.
+  Corrections survive loop context compaction. A steer during Director review
+  invalidates its terminal decision and returns control to Worker.
+  The Director packet also carries the last four applied corrections verbatim
+  (at most 64,000 characters), independently of the shorter objective summary.
+- Finalization closes admission before persistence awaits. Rejected messages stay
+  in the UI input. Stop aborts the current run and cancels unconsumed receipts.
+  Queues are in memory, are not restored after process shutdown, and never carry
+  into another run. Follow-up queues are not implemented.
+- The UI fallback without a resident runtime does not support steering.
+
+Run `bash scripts/selftest-agent-tools.sh` for mock-based regression coverage,
+including `selftest-agent-steer.mjs`. No real provider requests are needed.
+
 ## Supervised mode MVP
 
 `supervised` is a third per-thread strategy alongside `auto` and `assist`.

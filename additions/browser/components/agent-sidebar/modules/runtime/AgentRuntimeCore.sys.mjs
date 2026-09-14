@@ -76,6 +76,8 @@ export class AgentRuntimeCore {
   _newState() {
     return {
       running: false,
+      acceptingSteer: false,
+      steering: [],
       settled: false,
       steps: [],
       _curText: -1,
@@ -113,6 +115,8 @@ export class AgentRuntimeCore {
       return null;
     }
     state.running = true;
+    state.acceptingSteer = true;
+    state.steering = [];
     state.settled = false;
     state.steps = [];
     state._curText = -1;
@@ -137,11 +141,56 @@ export class AgentRuntimeCore {
   }
 
   settle(state) {
+    this.closeSteering(state);
     state.running = false;
     state.settled = true;
     state.abort = null;
     state.pendingConfirm = null;
     this.notify(state);
+  }
+
+  enqueueSteer(threadId, content) {
+    const state = this.sessions.get(threadId);
+    if (typeof content !== "string" || !content.trim()) {
+      return { ok: false, error: "请输入引导消息" };
+    }
+    if (!state?.running || !state.acceptingSteer || state.aborted) {
+      return { ok: false, error: "当前任务已停止或正在收尾，请等结束后发送" };
+    }
+    if (content.length > 16000 || state.steering.length >= 100) {
+      return { ok: false, error: "引导消息过长或本轮队列已达上限" };
+    }
+    const item = { id: state.steering.length + 1, content: content.trim(), status: "queued" };
+    state.steering.push(item);
+    // A waiting approval is not an executing tool. Decline it so the loop can
+    // reach the next safe boundary without granting stale tool permissions.
+    if (state.pendingConfirm) {
+      const resolve = state.pendingConfirm.resolve;
+      state.pendingConfirm = null;
+      resolve(false);
+    }
+    this.notify(state);
+    return { ok: true, id: item.id };
+  }
+
+  hasSteering(state) {
+    return state.acceptingSteer && !state.aborted &&
+      state.steering.some(item => item.status === "queued");
+  }
+
+  takeSteering(state) {
+    if (!this.hasSteering(state)) return [];
+    const items = state.steering.filter(item => item.status === "queued");
+    for (const item of items) item.status = "applying";
+    this.notify(state);
+    return items;
+  }
+
+  closeSteering(state) {
+    state.acceptingSteer = false;
+    for (const item of state.steering) {
+      if (item.status === "queued" || item.status === "applying") item.status = "cancelled";
+    }
   }
 
   isRunning(threadId) {
@@ -162,6 +211,8 @@ export class AgentRuntimeCore {
   snapshot(state) {
     return {
       running: state.running,
+      acceptingSteer: state.acceptingSteer,
+      steering: state.steering.map(item => ({ ...item })),
       settled: state.settled,
       steps: state.steps.slice(),
       error: state.error,
@@ -332,6 +383,7 @@ export class AgentRuntimeCore {
     if (!state || !state.abort) {
       return false;
     }
+    this.closeSteering(state);
     try {
       state.abort.abort();
     } catch {
@@ -352,12 +404,8 @@ export class AgentRuntimeCore {
   }
 
   abortAll() {
-    for (const state of this.sessions.values()) {
-      try {
-        state.abort?.abort();
-      } catch {
-        // Best effort during host shutdown.
-      }
+    for (const [threadId, state] of this.sessions) {
+      if (state.running) this.abortThread(threadId);
     }
   }
 

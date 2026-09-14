@@ -346,6 +346,8 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
   const [showHistory, setShowHistory] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [steerState, setSteerState] = useState(null);
+  const sendingRef = useRef(false);
   const [activeTool, setActiveTool] = useState(null);
   const [pendingConfirm, setPendingConfirm] = useState(null);
   const [liveSteps, setLiveSteps] = useState([]); // 本回合进行中的过程步骤（累积，不覆盖）
@@ -517,6 +519,7 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
         return;
       }
       const snap = session.getState(currentId);
+      if (snap) setSteerState({ threadId: currentId, items: snap.steering || [], accepting: snap.acceptingSteer });
       if (snap && snap.running) {
         // 上下文压缩落盘了一条 checkpoint 回复 → 从 store 重载历史(新气泡出现)，live 区随即显示新段。
         if ((snap.checkpointSeq || 0) > lastCkpt) {
@@ -866,11 +869,39 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     }
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || busy) {
+  function submitMessage() {
+    if (session?.isRunning(currentId)) {
+      const text = input.trim();
+      if (!text) return;
+      try {
+        const receipt = session.steer(currentId, text);
+        if (!receipt.ok) {
+          setError(receipt.error);
+          return;
+        }
+        setInput("");
+        setError(null);
+        const snap = session.getState(currentId);
+        setSteerState({ threadId: currentId, items: snap.steering || [], accepting: snap.acceptingSteer });
+      } catch (error) {
+        setError(error.message || String(error));
+      }
       return;
     }
+    if (busy) {
+      setError("任务正在启动或收尾，请稍后发送");
+      return;
+    }
+    void send();
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy || sendingRef.current) {
+      return;
+    }
+    sendingRef.current = true;
+    setSteerState(null);
     setError(null);
     setNotice(null);
     const userMsg = { role: "user", content: text };
@@ -1003,6 +1034,8 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
     } catch (e) {
       setError((e?.message || String(e)) + (e?.body ? "\n— " + String(e.body).slice(0, 600) : ""));
       setBusy(false);
+    } finally {
+      sendingRef.current = false;
     }
   }
 
@@ -1161,9 +1194,9 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
   }
 
   function onKeyDown(e) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      send();
+      submitMessage();
     }
   }
 
@@ -1413,21 +1446,32 @@ export default function AgentPanel({ buildClient, conversations, store, router, 
 
       {error && <div className="agent-panel__error">⚠ {error}</div>}
 
+      {steerState?.threadId === currentId && steerState.items.length > 0 && (
+        <div className="agent-panel__notice agent-panel__steering" aria-live="polite">
+          {steerState.items.map(item => (
+            <div key={item.id} title={item.content}>
+              {({ queued: "等待安全边界", applying: "正在投递", applied: "已加入上下文", cancelled: "未生效（任务已结束）" })[item.status]}
+              ：{item.content.length > 100 ? item.content.slice(0, 100) + "…" : item.content}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="agent-panel__input">
         <textarea
           value={input}
-          placeholder={busy ? "执行中…可继续输入，停止后或本轮结束再发送" : "输入消息，Enter 发送，Shift+Enter 换行"}
+          placeholder={busy ? "输入补充指令，Enter 引导当前任务；停止请点「停止」" : "输入消息，Enter 发送，Shift+Enter 换行"}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           rows={2}
         />
-        {busy ? (
-          <button type="button" className="agent-panel__stop" onClick={stopRun} title="停止自主执行">
+        <button type="button" onClick={submitMessage}
+          disabled={!input.trim() || (busy && (!session?.steer || !steerState?.accepting))}
+          title={busy ? "投递到当前任务，在下一个安全边界生效" : "开始新一轮任务"}>
+          {busy ? "引导" : "发送"}
+        </button>
+        {busy && (
+          <button type="button" className="agent-panel__stop" onClick={stopRun} title="取消当前任务及未生效的引导">
             停止
-          </button>
-        ) : (
-          <button type="button" onClick={send} disabled={!input.trim()}>
-            发送
           </button>
         )}
       </div>
