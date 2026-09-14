@@ -60,46 +60,6 @@ EXTRA_JS_MODULES.agentsidebar.tools += [
     "modules/tools/Tools.sys.mjs",
 ]
 
-# Flat legacy URLs forward to the same implementations (UI/MCP compatibility).
-EXTRA_JS_MODULES.agentsidebar += [
-    "modules/compat/AddonBackend.sys.mjs",
-    "modules/compat/AgentEvalChild.sys.mjs",
-    "modules/compat/AgentLoop.sys.mjs",
-    "modules/compat/AgentRuntime.sys.mjs",
-    "modules/compat/AgentRuntimeCore.sys.mjs",
-    "modules/compat/AgentRuntimePorts.sys.mjs",
-    "modules/compat/AgentSession.sys.mjs",
-    "modules/compat/AgentSupervisor.sys.mjs",
-    "modules/compat/AgentTurnOrchestrator.sys.mjs",
-    "modules/compat/Backends.sys.mjs",
-    "modules/compat/CodeBackend.sys.mjs",
-    "modules/compat/ConfigStore.sys.mjs",
-    "modules/compat/ContextProjection.sys.mjs",
-    "modules/compat/ConversationStore.sys.mjs",
-    "modules/compat/EnvironmentBackend.sys.mjs",
-    "modules/compat/EnvironmentBackendCurrent.sys.mjs",
-    "modules/compat/FirefoxAgentRuntimeHost.sys.mjs",
-    "modules/compat/JsvmpBackend.sys.mjs",
-    "modules/compat/LedgerBackend.sys.mjs",
-    "modules/compat/LlmClient.sys.mjs",
-    "modules/compat/LlmProtocol.sys.mjs",
-    "modules/compat/LlmRequestExecutor.sys.mjs",
-    "modules/compat/LlmStreamParser.sys.mjs",
-    "modules/compat/LlmTransport.sys.mjs",
-    "modules/compat/NetworkBackend.sys.mjs",
-    "modules/compat/NotesBackend.sys.mjs",
-    "modules/compat/PageBackend.sys.mjs",
-    "modules/compat/providers.sys.mjs",
-    "modules/compat/ReasoningEffort.sys.mjs",
-    "modules/compat/ScriptsBackend.sys.mjs",
-    "modules/compat/SkillBackend.sys.mjs",
-    "modules/compat/ToolRouter.sys.mjs",
-    "modules/compat/Tools.sys.mjs",
-    "modules/compat/Usage.sys.mjs",
-    "modules/compat/WebApiBackend.sys.mjs",
-    "modules/compat/WorkspaceBackend.sys.mjs",
-]
-
 DIRS += ["preferences"]
 
 JAR_MANIFESTS += ["jar.mn"]

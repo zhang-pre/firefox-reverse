@@ -31,10 +31,11 @@ for (const [, suffix, body] of blocks) {
   const groupEntries = [...body.matchAll(/"([^"]+)"/g)].map(match => match[1]);
   assert.deepEqual(groupEntries, [...groupEntries].sort(compare), "moz.build group must be sorted");
   const destination = suffix.slice(1).replaceAll(".", "/");
+  assert.ok(destination && destination !== "compat", "Agent modules must use responsibility-based directories");
   for (const entry of groupEntries) {
     const url = resourceRoot + (destination ? destination + "/" : "") + path.posix.basename(entry);
     assert.equal(installed.has(url), false, "duplicate installed URL: " + url);
-    const expectedDir = "modules/" + (destination || "compat");
+    const expectedDir = "modules/" + destination;
     assert.equal(path.posix.dirname(entry), expectedDir, "source and packaged directory disagree");
     installed.set(url, entry);
     entries.push(entry);
@@ -68,56 +69,6 @@ for (const [url, entry] of installed) {
     const resolved = new URL(specifier, url).href;
     assert.ok(installed.has(resolved), url + " imports missing " + resolved);
   }
-  if (entry.startsWith("modules/compat/")) {
-    const forward = moduleSource.match(/^export \* from "(resource:\/\/\/modules\/agentsidebar\/[^"]+)";$/m);
-    assert.ok(forward, "compatibility entry must re-export the implementation: " + entry);
-    assert.ok(installed.has(forward[1]), "missing compatibility target: " + entry);
-    assert.ok(!installed.get(forward[1]).startsWith("modules/compat/"), "compatibility entry must target an implementation");
-    assert.equal(path.posix.basename(forward[1]), path.posix.basename(entry));
-  }
-}
-// These URLs existed before the directory migration. New modules do not need
-// flat aliases unless they are deliberately exposed as legacy entry points.
-const legacyNames = [
-  "AddonBackend.sys.mjs",
-  "AgentEvalChild.sys.mjs",
-  "AgentLoop.sys.mjs",
-  "AgentRuntime.sys.mjs",
-  "AgentRuntimeCore.sys.mjs",
-  "AgentRuntimePorts.sys.mjs",
-  "AgentSession.sys.mjs",
-  "AgentSupervisor.sys.mjs",
-  "AgentTurnOrchestrator.sys.mjs",
-  "Backends.sys.mjs",
-  "CodeBackend.sys.mjs",
-  "ConfigStore.sys.mjs",
-  "ContextProjection.sys.mjs",
-  "ConversationStore.sys.mjs",
-  "EnvironmentBackend.sys.mjs",
-  "EnvironmentBackendCurrent.sys.mjs",
-  "FirefoxAgentRuntimeHost.sys.mjs",
-  "JsvmpBackend.sys.mjs",
-  "LedgerBackend.sys.mjs",
-  "LlmClient.sys.mjs",
-  "LlmProtocol.sys.mjs",
-  "LlmRequestExecutor.sys.mjs",
-  "LlmStreamParser.sys.mjs",
-  "LlmTransport.sys.mjs",
-  "NetworkBackend.sys.mjs",
-  "NotesBackend.sys.mjs",
-  "PageBackend.sys.mjs",
-  "ReasoningEffort.sys.mjs",
-  "ScriptsBackend.sys.mjs",
-  "SkillBackend.sys.mjs",
-  "ToolRouter.sys.mjs",
-  "Tools.sys.mjs",
-  "Usage.sys.mjs",
-  "WebApiBackend.sys.mjs",
-  "WorkspaceBackend.sys.mjs",
-  "providers.sys.mjs",
-];
-for (const name of legacyNames) {
-  assert.equal(installed.get(resourceRoot + name), "modules/compat/" + name, "missing legacy URL: " + name);
 }
 for (const name of ["index.jsx", "AgentPanel.jsx", "EnvironmentPane.jsx"]) {
   const uiSource = fs.readFileSync(path.join(sidebarPath, "content", name), "utf8");

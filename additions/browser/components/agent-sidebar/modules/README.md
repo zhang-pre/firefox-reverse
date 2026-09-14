@@ -11,7 +11,6 @@
 | `tools/` | 工具声明、注册和派发 | Tools、ToolRouter |
 | `backends/` | Firefox/本机能力实现、Actor、工作目录、记忆、Skills 和环境管理 | Backends、PageBackend、AgentEvalChild |
 | `host/` | Firefox 特权适配和进程级 Runtime 装配 | AgentSession、FirefoxAgentRuntimeHost |
-| `compat/` | 原有扁平 resource URL 的转发入口，无业务实现 | 仅兼容既有 UI/MCP 接入 |
 
 ## 源码路径与安装路径
 
@@ -22,17 +21,15 @@
 - Firefox：`resource:///modules/agentsidebar/runtime/AgentRuntime.sys.mjs`
 - Node 自测：`../modules/runtime/AgentRuntime.sys.mjs`
 
-`compat/` 是唯一例外：由 `EXTRA_JS_MODULES.agentsidebar` 安装到扁平根目录。
-例如旧的 `resource:///modules/agentsidebar/AgentSession.sys.mjs` 只重导出
-`host/AgentSession.sys.mjs`，新旧 URL 因而共享同一个 Runtime、Store 和 Backend。
-这些文件使用 Firefox resource URL，Node 测试应直接导入业务实现。
+所有调用方必须使用分组后的路径。旧的扁平 resource URL 已移除；
+仓库外的自定义脚本也需迁移，例如 AgentSession 使用
+`resource:///modules/agentsidebar/host/AgentSession.sys.mjs`。
 
 ## 后续开发
 
 - 新增模块放入职责对应的目录，并在 `moz.build` 的对应分组按大小写无关顺序登记。
 - 模块内部使用相对导入，UI/Actor 使用包含目录的 resource URL。
-- 新模块不必增加兼容入口；`compat/` 用于保留本次迁移前已有的公开路径。
 - 修改 JSX 后先运行侧边栏的 `npm run build`，再用项目根目录的
   `bash scripts/sync-additions.sh` 同步到 Firefox 源码树并构建。
 - 项目根目录运行 `bash scripts/selftest-agent-tools.sh`，覆盖双模型逻辑、
-  模块清单、安装后导入链及旧 URL 转发关系。
+  模块清单及安装后导入链。

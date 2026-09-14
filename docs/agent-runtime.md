@@ -10,9 +10,9 @@ Sources are grouped under `additions/browser/components/agent-sidebar/modules/`:
 `runtime/` (including Worker/Director supervision), `llm/`, `providers/`,
 `state/`, `tools/`, `backends/`, and `host/`.
 The [module directory guide](../additions/browser/components/agent-sidebar/modules/README.md)
-maps responsibilities and installation paths. New code imports these grouped
-paths; `compat/` preserves the previous flat Firefox resource URLs by re-exporting
-the same implementations, including the shared AgentSession instance.
+maps responsibilities and installation paths. All callers must import these grouped
+paths. Flat compatibility URLs have been removed; external scripts must migrate
+to the grouped paths as well.
 
 1. **AgentRuntimeCore** owns in-memory thread state, event reduction,
    subscriptions, confirmation state, cancellation, and window reservations.
