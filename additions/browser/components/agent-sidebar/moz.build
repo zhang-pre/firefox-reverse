@@ -53,6 +53,7 @@ EXTRA_JS_MODULES.agentsidebar.runtime += [
 EXTRA_JS_MODULES.agentsidebar.state += [
     "modules/state/ContextProjection.sys.mjs",
     "modules/state/ConversationStore.sys.mjs",
+    "modules/state/TurnContext.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.tools += [

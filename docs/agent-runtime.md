@@ -56,6 +56,26 @@ AgentPanel
                                 -> final-only run_node/run_python callback
 ```
 
+## Context ownership
+
+- **state/ContextProjection** owns cross-turn model-history projection. The
+  conversation store retains the full UI history and the persisted projection.
+- **state/TurnContext** owns one turn's model budget, request trimming, sanitized
+  history, task anchor, steering retention, handoff summary and compaction rebuild.
+  Its injected client and callbacks keep it independent of Firefox and storage.
+- **runtime/AgentLoop** chooses safe boundaries and calls TurnContext; it still
+  owns LLM/tool execution, steering consumption, tool-result folding and loop guards.
+- **runtime/AgentTurnOrchestrator** supplies checkpoint/usage callbacks and owns
+  persistence, workspace handoff files and lifecycle. TurnContext never calls it
+  directly.
+
+TurnContext is created per loop segment. Its initialMessages seeds the loop;
+requestMessages(history) returns a bounded request view without mutating history;
+appendSteering(history, incoming) preserves corrections in the task anchor;
+compact(round, history) returns the retained or rebuilt history.
+The existing thresholds, handoff prompt and fallback behavior are unchanged.
+Cross-turn projection and within-turn compaction intentionally remain separate.
+
 ## Steering the active run
 
 - Idle Send starts a run. During a run, the UI sends text through

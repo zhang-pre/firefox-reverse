@@ -7,7 +7,7 @@
 | `runtime/` | 平台无关运行时、状态内核、Ports、Worker 循环、Director 审阅与应用编排 | AgentRuntime、AgentTurnOrchestrator、AgentSupervisor、AgentLoop |
 | `llm/` | 模型请求、协议转换、SSE、重试、Transport、思考等级和 Usage | LlmClient |
 | `providers/` | Provider 元数据、Worker/Director 模型配置、Client 构造 | providers、ConfigStore |
-| `state/` | 会话持久化和长期上下文投影 | ConversationStore、ContextProjection |
+| `state/` | 会话持久化、跨 Turn 投影、Turn 内上下文压缩与裁剪 | ConversationStore、ContextProjection、TurnContext |
 | `tools/` | 工具声明、注册和派发 | Tools、ToolRouter |
 | `backends/` | Firefox/本机能力实现、Actor、工作目录、记忆、Skills 和环境管理 | Backends、PageBackend、AgentEvalChild |
 | `host/` | Firefox 特权适配和进程级 Runtime 装配 | AgentSession、FirefoxAgentRuntimeHost |

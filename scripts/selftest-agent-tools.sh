@@ -36,6 +36,7 @@ SELFTESTS=(
   selftest-llm-architecture.mjs
   selftest-context-projection.mjs
   selftest-context-runtime.mjs
+  selftest-turn-context.mjs
   selftest-skills.mjs
   selftest-stream.mjs
   selftest-retry.mjs
