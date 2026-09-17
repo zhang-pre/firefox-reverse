@@ -8,6 +8,7 @@
  */
 
 import { createTurnContext, modelBudget } from "../state/TurnContext.sys.mjs";
+import { STAGE_CHECKPOINT_TOOL, validateStageCheckpoint } from "./AgentSupervisor.sys.mjs";
 
 // 单条工具结果回灌进对话上下文的字符上限。超出只截头部+提示分段读，避免长会话上下文无界膨胀→TTFT 超时。
 const TOOL_RESULT_CAP = 6000;
@@ -282,6 +283,7 @@ export async function runAgentTurn(p) {
     vision = false, // 模型是否支持看图：true 时把截图等图像作为 user 图片消息回喂
     contextStrategy = "legacy", // projected=小上下文+大结果折叠；legacy=旧行为，可随时回退
     cacheKey = "",
+    stageGate = null, // Runtime-owned supervised stage and per-segment dispatch budget.
   } = p || {};
 
   if (!client || typeof client.chat !== "function") {
@@ -339,7 +341,12 @@ export async function runAgentTurn(p) {
     .sort((a, b) =>
       String(a?.function?.name || "").localeCompare(String(b?.function?.name || ""))
     );
+  if (stageGate) tools.push(STAGE_CHECKPOINT_TOOL);
   const allToolCalls = [];
+  const dispatchBudget = stageGate ? Math.max(1, Math.min(20, stageGate.toolBudget || 20)) : Infinity;
+  let dispatched = 0;
+  let gateReason = "";
+  let checkpoint = null;
   const toolCounts = {}; // 每个工具本回合调用次数（防打转）
   const failSigs = {}; // (工具+错误签名) → 次数（反绕圈：同错反复出现就提示换路线）
   let consecErr = 0; // 连续失败计数（任意类型错；任一成功即清零）——抓"各种错连环=空转"
@@ -526,6 +533,14 @@ export async function runAgentTurn(p) {
         break;
       }
       const name = tc.function?.name;
+      if (stageGate && (gateReason || dispatched >= dispatchBudget)) {
+        gateReason ||= "segment_budget";
+        const env = { ok: false, skipped: true, error: "Runtime 阶段门已暂停，本调用未执行；等待 Director 决策后重新提交。" };
+        msgs.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(env) });
+        emit({ type: "tool_call", name, args: {}, id: tc.id });
+        emit({ type: "tool_result", name, env, id: tc.id });
+        continue;
+      }
       let args = {};
       let parseErr = null;
       try {
@@ -564,6 +579,14 @@ export async function runAgentTurn(p) {
       let env;
       if (parseErr) {
         env = { ok: false, error: parseErr };
+      } else if (stageGate && name === "stage_checkpoint") {
+        try {
+          checkpoint = validateStageCheckpoint(args);
+          gateReason = "stage_checkpoint";
+          env = { ok: true, data: { stage: stageGate.stage, awaitingDirector: true, checkpoint } };
+        } catch (error) {
+          env = { ok: false, error: error.message };
+        }
       } else if (repeatBlocked) {
         env = {
           ok: false,
@@ -581,13 +604,15 @@ export async function runAgentTurn(p) {
         emit({ type: "confirm_result", name, id: tc.id, approved: !!approved });
         approved = approved && !signal?.aborted && !hasSteering();
         env = approved
-          ? await router.dispatch(name, args, toolCtx)
+          ? (dispatched++, await router.dispatch(name, args, toolCtx))
           : { ok: false, error: "user denied tool execution", denied: true };
       } else {
+        dispatched++;
         env = await router.dispatch(name, args, toolCtx);
       }
 
-      allToolCalls.push({ name, args, env, id: tc.id });
+      const evidenceId = stageGate && name !== "stage_checkpoint" ? `tool:${stageGate.scope}:${allToolCalls.length + 1}` : undefined;
+      allToolCalls.push({ name, args, env, id: tc.id, ...(evidenceId ? { evidenceId } : {}) });
       emit({ type: "tool_result", name, env, id: tc.id });
 
       // A2：更新重复跟踪。被熔断拒绝(repeatBlocked)的不计入；正常执行后比对结果指纹：
@@ -679,7 +704,7 @@ export async function runAgentTurn(p) {
       msgs.push({
         role: "tool",
         tool_call_id: tc.id,
-        content: contentStr,
+        content: evidenceId ? `${contentStr}\nRuntime evidenceId: ${evidenceId}` : contentStr,
       });
 
       // 视觉回喂：模型支持看图时，把图像作为 user 图片消息追加，让模型"看见"页面。
@@ -696,6 +721,15 @@ export async function runAgentTurn(p) {
           msgs.push({ role: "user", content: blocks });
         }
       }
+    }
+
+    if (stageGate && (gateReason || dispatched >= dispatchBudget) && !signal?.aborted) {
+      const stopReason = gateReason || "segment_budget";
+      return {
+        content: checkpoint ? JSON.stringify(checkpoint) : `Runtime 分段预算已达 ${dispatchBudget} 次工具派发，提交已有证据审阅。`,
+        rounds: round, toolCalls: allToolCalls, messages: msgs, stopReason,
+        checkpoint, dispatched,
+      };
     }
 
     // A1 无进展软提醒（轻量、不强制）：连续 NO_PROGRESS_BUDGET 次零真实前进 → 注入**一条温和提醒**，

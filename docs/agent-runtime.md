@@ -118,7 +118,13 @@ Worker tools and reasoning
      -> finish              -> code-level final acceptance -> settle
 ```
 
-Ordinary stage reviews have no tools. At `final_candidate`, Director receives
+DISCOVERY reviews expose only `evidence_read` (at most two reads per review),
+which resolves runtime-generated evidence IDs to captured tool arguments and
+results from this run. It accepts neither arbitrary paths nor new execution.
+Each read is paginated at 6,000 characters. Failed, truncated, and write-only
+receipts cannot alone authorize P2. Read receipts and the structured P2 assessment
+are retained in the Director UI. Other intermediate reviews have no tools.
+At `final_candidate` after P2 approval, Director receives
 only `run_node` and `run_python`, with `file` and string-array `args`. It can run
 at most three calls per review, sequentially, through the existing Router and
 thread-bound workspace/cancellation context. Only explicit `out/*.js`, `.mjs`,
@@ -139,22 +145,41 @@ Exit code 0 does not prove business success; Director interprets the output.
 Script stdout is not independently authenticated network evidence. No separate
 Verifier role or host-level network attestation is introduced.
 
-Review timing is driven by Worker segment returns, not a phase detector:
-`_runSupervised` runs AgentLoop with `assist: true`, so a non-truncated response
-without tool calls ends the segment and invokes Director. P1/P2/P4/P6 gates are
-prompt guidance only. `inferDirectorTrigger` classifies the returned segment in
-priority order: `max_rounds`, `drift`, explicit `candidate_complete`, then legacy
-completion phrases; other returns are ordinary stage gates. The phase label is
-display metadata, not a scheduler condition.
+Runtime scheduling starts each supervised run in DISCOVERY. Worker submits
+`stage_checkpoint` with phase P2, ROUTE_CHANGE, or P6, candidate, evidenceRefs,
+verified/unverified claims, and proposedNextStep. A valid checkpoint immediately
+yields to Director; remaining calls in the same batch receive skipped replies
+without execution. Even without a checkpoint, 20 actual Router dispatches force
+a segment_budget handoff, with no extra Worker summary request. Ordinary no-tool
+returns, max_rounds and drift still yield. Budget handoffs can precede P2.
+
+DISCOVERY cannot advance to IMPLEMENTATION unless a P2 checkpoint is present,
+Director actually reads selected evidence, and its continue/redirect decision
+requests IMPLEMENTATION with all five P2 assessment fields: entry, inputs,
+outputScope, stateAndEncoding, and limitations. Referenced receipts must be
+selected by the checkpoint and successfully read as reviewable evidence.
+Summary-only approval and premature finish are rejected. Only an implementation
+final candidate opens ACCEPTANCE and the existing final execution tools. Director
+can redirect to DISCOVERY, requiring renewed P2 approval. User steering restarts
+discovery and the evidence collection, so stale approvals do not govern new work.
+
+These are runtime handoff and acceptance guards, not a semantic tool firewall:
+general-purpose Worker tools can still execute implementation-like code during
+exploration. P2 correctness remains a Director judgment; captured stdout is not
+authenticated independent evidence. Step one adds no p2_compare/browser replay
+capability. A textual phase label alone still cannot transition runtime state.
 
 Automatic repair stops after three consecutive reviews that request continuation
 while reporting a blocker (`Director.blocked` or `Worker blocked: true`), rejecting
-a final candidate, recovering drift, or receiving no successful Worker tool calls.
+a final candidate or P2 checkpoint, recovering drift, or receiving no successful Worker tool calls.
 A normal intermediate stage with successful tool activity and no reported blocker resets this count.
 This is a bounded retry policy, not automatic proof of progress or matching of
 root causes. Director sees the count and the last three decisions. It may return
 `stop` earlier for an evidenced unresolved constraint, or `ask_user` for missing
 input. The overall twelve-review cap remains as a fallback.
+Budget-only handoffs without a reported blocker neither increment nor reset the
+consecutive failure counter. Checkpoint acknowledgements do not count as successful
+exploration. Repeatedly rejected P2 checkpoints stop after three reviews.
 
 On `stop`, `ask_user`, or either cap, Worker makes one report-only LLM request
 with no tools, summarizing verified progress, unfinished work, attempted fixes,
@@ -180,7 +205,8 @@ so embedded page or tool-output instructions do not override the Director role.
   credentials and Worker/Director profile references in `ConfigStore`.
 - Keep session persistence in `AgentTurnOrchestrator`/conversation ports, not in the
   state kernel.
-- Director receives only the two restricted final-execution schemas. Supervisor
+- Director receives the bounded evidence-read schema in DISCOVERY or the two
+  restricted final-execution schemas in ACCEPTANCE. Supervisor
   validates calls before forwarding them through Orchestrator's execution callback.
   Direction changes and repairs return through the decision contract to Worker.
 - New privileged capabilities must be implemented as backends and registered in

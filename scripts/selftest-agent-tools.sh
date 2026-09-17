@@ -25,6 +25,7 @@ SELFTESTS=(
   selftest-agent-runtime-factory.mjs
   selftest-agent-steer.mjs
   selftest-agent-supervisor.mjs
+  selftest-stage-gates.mjs
   selftest-agent-turn-orchestrator.mjs
   selftest-config.mjs
   selftest-mozbuild.mjs

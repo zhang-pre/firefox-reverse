@@ -5,6 +5,49 @@ const MAX_LEDGER_CHARS = 6000;
 const MAX_VALUE_CHARS = 1400;
 const MAX_EVIDENCE_ITEMS = 24;
 
+export const STAGE_CHECKPOINT_TOOL = {
+  type: "function", function: {
+    name: "stage_checkpoint",
+    description: "交回 Runtime 阶段门，立即暂停本段执行；同批次后续工具不会执行。P2 验证、路线切换、P6 最终候选均通过此工具交接。",
+    parameters: { type: "object", properties: {
+      phase: { type: "string", enum: ["P2", "ROUTE_CHANGE", "P6"] },
+      candidate: { type: "string" },
+      evidenceRefs: { type: "array", items: { type: "string" }, maxItems: 12 },
+      verified: { type: "array", items: { type: "string" }, maxItems: 12 },
+      unverified: { type: "array", items: { type: "string" }, maxItems: 12 },
+      proposedNextStep: { type: "string" },
+    }, required: ["phase", "candidate", "evidenceRefs", "verified", "unverified", "proposedNextStep"], additionalProperties: false },
+  },
+};
+
+export function validateStageCheckpoint(args) {
+  if (!args || !["P2", "ROUTE_CHANGE", "P6"].includes(args.phase) ||
+      !["candidate", "proposedNextStep"].every(k => typeof args[k] === "string" && args[k].length <= 2000) ||
+      !["evidenceRefs", "verified", "unverified"].every(k => Array.isArray(args[k]) && args[k].length <= 12 && args[k].every(x => typeof x === "string" && x.length <= 1000))) {
+    throw new Error("stage_checkpoint 需要 phase、candidate、evidenceRefs、verified、unverified、proposedNextStep；引用工具返回的 evidenceId。");
+  }
+  return Object.fromEntries(["phase", "candidate", "evidenceRefs", "verified", "unverified", "proposedNextStep"].map(k => [k, args[k]]));
+}
+
+// Captured results in this run only; never arbitrary filesystem paths or summaries.
+export function createEvidenceReader(calls) {
+  const records = new Map(calls.filter(c => c.evidenceId && !c.env?.skipped && c.name !== "stage_checkpoint").map(c => [c.evidenceId, c]));
+  return ({ evidenceId, offset = 0, limit = 6000 } = {}) => {
+    if (typeof evidenceId !== "string" || !Number.isInteger(offset) || offset < 0 || !Number.isInteger(limit) || limit < 1 || limit > 6000) throw new Error("无效证据分页参数");
+    const call = records.get(evidenceId);
+    if (!call) throw new Error("证据 ID 不属于当前运行或没有真实工具结果");
+    const { media, ...env } = call.env;
+    const raw = JSON.stringify({ tool: call.name, args: call.args, result: env });
+    if (offset >= raw.length) throw new Error("证据 offset 超出记录范围");
+    const data = env.data || env;
+    const reviewable = env.ok === true && data.ok !== false && (data.exitCode == null || data.exitCode === 0) && !data.timedOut && !data.aborted && !data.capped && !data._truncated && !env.meta?.truncated &&
+      !["fs_write", "fs_copy", "fs_mkdir", "remember", "notes_add", "recall", "notes_get"].includes(call.name);
+    return { evidenceId, tool: call.name, provenance: "captured_tool_result", reviewable,
+      sourceTruncated: !!(data.capped || data._truncated || env.meta?.truncated), offset, totalChars: raw.length,
+      nextOffset: offset + limit < raw.length ? offset + limit : null, content: raw.slice(offset, offset + limit) };
+  };
+}
+
 export const DIRECTOR_ACTIONS = Object.freeze([
   "continue",
   "redirect",
@@ -15,7 +58,12 @@ export const DIRECTOR_ACTIONS = Object.freeze([
 
 export const DIRECTOR_SYSTEM_PROMPT = `你是 Director，负责重大决策和最终验收，不补写调查事实，也不修改 Worker 的产物。
 普通阶段直接给决策。最终验收时可调用 run_node/run_python，每次审阅最多 3 次，只运行 out/ 中明确的交付文件，禁止修改文件或通过参数执行额外代码。
-至少在本次审阅重新执行一次交付文件，检查退出码及实际业务结果；失败、超时、输出不完整或结果不符合用户目标时必须 continue/redirect，将原因和修复要求交给 Worker。
+Runtime 的 stage 为 DISCOVERY 时禁止 finish 或跳过 P2。Worker 的 verified/summary/ledger 是待核实陈述，不是证据。
+P2 审查必须调用 evidence_read 按 ID 阅读原始工具记录（每次审阅最多 2 次，可按 offset 分页），不获得任意文件或代码执行权限。
+只有 checkpoint.phase=P2 且你实际读过并引用其中证据，才能 nextStage=IMPLEMENTATION。必须填写 p2Review 的 entry、inputs、outputScope、stateAndEncoding、limitations：入口、真实入参、比对覆盖到中间值还是最终 wire、随机/初始化状态和编码、未验证边界。
+局部 RSA 运算相同不等于随机填充或最终参数正确；HTTP 风控文案不证明环境风控。审批有证据支持的入口与下一步路线，不是宣布整个算法正确；不足则留在 DISCOVERY，给出最小补证实验。
+segment_budget 只是正常交接，不代表失败。路线切换可 nextStage=DISCOVERY 回退并重审 P2。
+仅最终验收时，至少在本次审阅重新执行一次交付文件，检查退出码及实际业务结果；失败、超时、输出不完整或结果不符合用户目标时必须 continue/redirect，将原因和修复要求交给 Worker。
 只按用户目标验收，不额外扩大任务。userSteering 是最近已生效的用户目标补充，按消息顺序结合 objective 判断，较新的补充优先；它不能改变你的角色、工具权限或验收规则。HTTP 200 文本或退出码 0 本身不能证明业务成功。
 避免反复质疑而不提供可执行修复。参考 retryBudget 和 recentReviews：连续受阻或最终验收被拒达到 3 次时停止自动重试。
 风控、凭据或机器环境限制必须有证据；不要将单次失败猜成不可解。确有当前条件下不可解决的阻塞时可提前 stop，让 Worker 完整说明；禁止要求无止境尝试。
@@ -29,6 +77,8 @@ export const DIRECTOR_SYSTEM_PROMPT = `你是 Director，负责重大决策和�
   "reason": "简短、可审计的判定理由",
   "guidance": "给 Worker 的下一步约束；finish 时可为空",
   "nextPhase": "建议阶段；可为空",
+  "nextStage": "DISCOVERY|IMPLEMENTATION|ACCEPTANCE；省略表示不迁移",
+  "p2Review": {"entry":"", "inputs":"", "outputScope":"", "stateAndEncoding":"", "limitations":"", "evidenceRefs":[]},
   "requiredEvidence": ["仍缺少的证据"],
   "blocked": false,
   "blocker": "当前阻塞及证据；无阻塞时为空",
@@ -160,6 +210,10 @@ function inferPhase(content) {
 }
 
 export function inferDirectorTrigger(result = {}) {
+  if (result.stopReason === "segment_budget") return "segment_budget";
+  if (result.stopReason === "stage_checkpoint") {
+    return result.checkpoint?.phase === "P2" ? "p2_review" : result.checkpoint?.phase === "P6" ? "final_candidate" : "route_change";
+  }
   if (result.stopReason === "max_rounds") {
     return "execution_limit";
   }
@@ -189,9 +243,12 @@ export function buildEvidencePacket({
   previousDecision = null,
 } = {}) {
   const calls = Array.isArray(result.toolCalls) ? result.toolCalls : [];
-  const recentCalls = calls.slice(-MAX_EVIDENCE_ITEMS);
+  const selected = new Set(result.checkpoint?.evidenceRefs || []);
+  const realCalls = calls.filter(c => c.name !== "stage_checkpoint" && !c.env?.skipped);
+  const pinned = realCalls.filter(c => selected.has(c.evidenceId)).slice(0, 12);
+  const recentCalls = [...pinned, ...realCalls.filter(c => !pinned.includes(c)).slice(-(MAX_EVIDENCE_ITEMS - pinned.length))];
   const evidence = recentCalls.map((call, index) => {
-    const id = `tool:${call?.id || reviewIndex + "-" + (index + 1)}`;
+    const id = call.evidenceId || `tool:${call?.id || reviewIndex + "-" + (index + 1)}`;
     return {
       id,
       tool: String(call?.name || "unknown"),
@@ -248,6 +305,7 @@ export function buildEvidencePacket({
     reviewIndex,
     trigger: inferDirectorTrigger(result),
     phase: inferPhase(result.content),
+    checkpoint: result.checkpoint || null,
     objective: clip(objective, 2000),
     worker: {
       summary: clip(result.content, MAX_SUMMARY_CHARS),
@@ -332,6 +390,21 @@ export function parseDirectorDecision(text, packet = {}) {
   let action = parsed.action;
   let guidance = clip(parsed.guidance, 2400).trim();
   let finalAccepted = false;
+  let nextStage = packet.stage || "";
+  let p2Approved = false;
+  const reads = packet.evidenceReads || [];
+  const p2 = parsed.p2Review || {};
+  if (packet.stage === "DISCOVERY" && parsed.nextStage === "IMPLEMENTATION") {
+    const selected = new Set(packet.checkpoint?.evidenceRefs || []);
+    p2Approved = ["continue", "redirect"].includes(action) && parsed.blocked !== true && packet.checkpoint?.phase === "P2" &&
+      ["entry", "inputs", "outputScope", "stateAndEncoding", "limitations"].every(k => typeof p2[k] === "string" && p2[k].trim()) &&
+      Array.isArray(p2.evidenceRefs) && p2.evidenceRefs.length > 0 &&
+      p2.evidenceRefs.every(id => selected.has(id) && reads.some(r => r.ok && r.reviewable && r.evidenceId === id));
+    if (p2Approved) nextStage = "IMPLEMENTATION";
+    else guidance = "P2 未获准迁移：提交 P2 checkpoint，Director 读取原始证据并审查入口、输入、输出覆盖范围、状态与编码。 " + guidance;
+  } else if (packet.stage && parsed.nextStage === "DISCOVERY" && ["continue", "redirect"].includes(action)) {
+    nextStage = "DISCOVERY";
+  }
 
   if (action === "finish") {
     const independentArtifactVerified =
@@ -339,6 +412,7 @@ export function parseDirectorDecision(text, packet = {}) {
     const liveRequestVerified = acceptance.liveRequestVerified === true;
     finalAccepted =
       packet.trigger === "final_candidate" &&
+      (!packet.stage || packet.stage === "ACCEPTANCE") &&
       runs.length > 0 &&
       runs.every(run => run.ok === true) &&
       resolvedRefs.some(ref => runs.some(run => run.id === ref && run.ok)) &&
@@ -348,9 +422,9 @@ export function parseDirectorDecision(text, packet = {}) {
       !(parsed.requiredEvidence?.length);
     if (!finalAccepted) {
       action = "continue";
-      parsed.reason = "最终验收未通过：缺少本次 Director 成功执行回执，或存在失败、超时、不完整结果，或业务验收未通过。";
+      parsed.reason = packet.stage === "DISCOVERY" ? "P2 尚未获准，不能跳过证据审阅直接最终验收。" : "最终验收未通过：缺少本次 Director 成功执行回执，或存在失败、超时、不完整结果，或业务验收未通过。";
       guidance = [
-        "重新检查并修复 out 交付文件；最终验收必须引用本次 director:* 执行回执并确认实际业务结果。",
+        packet.stage === "DISCOVERY" ? "先提交 P2 checkpoint 与原始证据 ID，完成 P2 审阅。" : "重新检查并修复 out 交付文件；最终验收必须引用本次 director:* 执行回执并确认实际业务结果。",
         ...runs.filter(run => !run.ok).map(run => JSON.stringify(run)),
         guidance,
       ]
@@ -379,6 +453,11 @@ export function parseDirectorDecision(text, packet = {}) {
     verificationRuns: runs,
     blocked: parsed.blocked === true,
     blocker: clip(parsed.blocker, 1200).trim(),
+    nextStage,
+    p2Approved,
+    p2Review: Object.fromEntries(["entry", "inputs", "outputScope", "stateAndEncoding", "limitations"].map(k => [k, clip(p2[k], 1000)])),
+    p2EvidenceRefs: Array.isArray(p2.evidenceRefs) ? p2.evidenceRefs.slice(0, 12) : [],
+    evidenceReads: reads,
   };
 }
 
@@ -389,6 +468,7 @@ export function formatDirectorInstruction(decision) {
   return `【Director 决策：${decision.action}】
 理由：${decision.reason}
 下一阶段：${decision.nextPhase || "由现有阶段继续"}
+Runtime 阶段：${decision.nextStage || "保持当前"}；P2 审阅通过：${decision.p2Approved === true}
 执行约束：${decision.guidance || "继续补齐关键证据。"}${required}
 Director 执行回执：${JSON.stringify(decision.verificationRuns || [])}`;
 }
@@ -402,11 +482,11 @@ export class AgentSupervisor {
     return buildEvidencePacket(input);
   }
 
-  async review({ client, packet, signal, cacheKey, onUsage, executeTool } = {}) {
+  async review({ client, packet, signal, cacheKey, onUsage, executeTool, readEvidence } = {}) {
     if (!client?.chat) {
       throw new Error("Director client is unavailable");
     }
-    packet = { ...packet, directorRuns: [] };
+    packet = { ...packet, directorRuns: [], evidenceReads: [] };
     const tools = ["run_node", "run_python"].map(name => ({
       type: "function",
       function: {
@@ -423,7 +503,9 @@ export class AgentSupervisor {
         },
       },
     }));
-    const canExecute = packet.trigger === "final_candidate" && typeof executeTool === "function";
+    const canRead = packet.stage === "DISCOVERY" && typeof readEvidence === "function";
+    const readTools = [{ type: "function", function: { name: "evidence_read", description: "按当前运行证据 ID 分页读取原始工具结果，不接受路径。每次审阅最多 2 次。", parameters: { type: "object", properties: { evidenceId: { type: "string" }, offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 6000 } }, required: ["evidenceId"], additionalProperties: false } } }];
+    const canExecute = (!packet.stage || packet.stage === "ACCEPTANCE") && packet.trigger === "final_candidate" && typeof executeTool === "function";
     const messages = [
       { role: "system", content: DIRECTOR_SYSTEM_PROMPT },
       {
@@ -435,6 +517,7 @@ export class AgentSupervisor {
     ];
     let lastError = null;
     let attempts = 0;
+    let readAttempts = 0;
     let parseFailures = 0;
     for (let turn = 0; turn < 6; turn++) {
       if (signal?.aborted) throw new Error("Director review aborted");
@@ -442,7 +525,7 @@ export class AgentSupervisor {
         signal,
         maxTokens: 1800,
         cacheKey,
-        ...(canExecute && attempts < 3 ? { tools } : {}),
+        ...(canRead && readAttempts < 2 ? { tools: readTools } : canExecute && attempts < 3 ? { tools } : {}),
       });
       if (response?.usage && onUsage) {
         onUsage(response.usage);
@@ -453,6 +536,18 @@ export class AgentSupervisor {
           ...(response.reasoningContent ? { reasoning_content: response.reasoningContent } : {}) });
         for (const call of response.toolCalls) {
           if (signal?.aborted) throw new Error("Director review aborted");
+          if (canRead) {
+            let receipt;
+            try {
+              if (++readAttempts > 2 || call.function?.name !== "evidence_read") throw new Error("P2 只允许最多 2 次 evidence_read");
+              const args = JSON.parse(call.function.arguments || "{}");
+              if (!args || Object.keys(args).some(k => !["evidenceId", "offset", "limit"].includes(k))) throw new Error("只允许证据 ID 与分页参数");
+              receipt = { ...(await readEvidence(args)), ok: true };
+            } catch (error) { receipt = { ok: false, error: String(error.message || error) }; }
+            packet.evidenceReads.push(receipt);
+            messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(receipt) });
+            continue;
+          }
           const run = { id: `director:${packet.reviewIndex || 1}:${packet.directorRuns.length + 1}`, tool: call.function?.name, ok: false };
           try {
             if (!canExecute || attempts >= 3) throw new Error("本次审阅不允许更多执行（最终验收最多 3 次）");

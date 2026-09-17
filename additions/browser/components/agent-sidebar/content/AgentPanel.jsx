@@ -66,8 +66,8 @@ const ASSIST_BLOCK = `
 const SUPERVISED_BLOCK = `
 
 【执行模式：双模型领航·Worker】你负责调查和工具执行；Director 在阶段门审阅并纠偏，最终验收会用 run_node/run_python 重跑 out/ 中的交付文件（每次审阅最多 3 次），失败则交回你修复。
-1. 收到目标后直接用工具完成一个连贯阶段，不要每一步停下，也不要替 Director 编造战略意见。
-2. 到 P1/P2/P4/P6 等高杠杆阶段门、执行上限或最终候选时，停止调用工具并输出一个简短证据块：
+1. 收到目标先推进 DISCOVERY（P0/P1/P2）。双模型 Runtime 阶段约束优先于上文“不间断推进”要求。P2 未获批准不能进入主要实现。
+2. P2 入口验证后调用 stage_checkpoint(phase="P2")，引用工具返回的 Runtime evidenceId，填写 candidate、verified、unverified、proposedNextStep。路线切换用 ROUTE_CHANGE，最终候选用 P6。Runtime 会暂停并跳过同批后续工具；每段最多 20 次实际工具派发，忘记交接也会自动审阅。辅助说明可用：
 [WORKER_EVIDENCE]
 phase: 当前阶段
 candidate_complete: true|false
@@ -79,7 +79,7 @@ next_step: 若未完成，下一步最小动作
 blocked: true|false（当前是否受阻、没有实质突破；列出限制和具体失败证据）
 [/WORKER_EVIDENCE]
 3. 只有已经产出可独立运行脚本、真实接口成功响应且能引用证据时，candidate_complete 才能为 true。普通文字总结不算完成。
-4. Director 的 continue/redirect 决策会作为下一条内部指令返回；严格执行其中的证据要求，然后进入下一个阶段门。
+4. Director 的 continue/redirect 决策会作为下一条内部指令返回。以 Runtime 阶段为准，不能用普通 phase 文字或 candidate_complete 跳过 P2。提交观测与原始证据，把推断、未知分开；禁止将局部一致概括为完整算法正确。
 5. 缺登录态、账号、验证码、权限或不可推断的业务选择时如实列为 blocker，由 Director 决定是否请求用户。`;
 
 // 内联 SVG 图标（stroke=currentColor，随主题/字色变化，比 emoji 清晰可控）
@@ -214,6 +214,14 @@ function DirectorSeg({ step }) {
         <span className="msg__director-trigger">{step.trigger || "stage_gate"}</span>
       </div>
       {step.reason ? <div className="msg__director-reason">{step.reason}</div> : null}
+      {step.runtimeStage ? <div className="msg__director-evidence">阶段：{step.runtimeStage}{step.p2Approved ? " · P2 证据审阅通过" : ""}</div> : null}
+      {step.evidenceReads?.map((read, i) => (
+        <details key={`evidence-${i}`} className="msg__director-evidence">
+          <summary>证据读取：{read.evidenceId || "无效引用"} · {read.ok ? `${read.tool}（偏移 ${read.offset}）` : "失败"}</summary>
+          <pre>{read.error || read.content}</pre>
+        </details>
+      ))}
+      {step.p2Approved ? <details className="msg__director-evidence"><summary>P2 审查范围与未验证边界</summary><pre>{JSON.stringify(step.p2Review, null, 2)}{"\n"}{step.p2EvidenceRefs?.join(", ")}</pre></details> : null}
       {step.guidance ? <div className="msg__director-guide">下一步：{step.guidance}</div> : null}
       {step.verificationRuns?.map(run => (
         <details key={run.id} className="msg__director-evidence">

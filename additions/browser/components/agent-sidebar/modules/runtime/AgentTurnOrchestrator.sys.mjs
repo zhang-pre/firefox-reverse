@@ -9,6 +9,7 @@ import { slimifySteps, textFromSteps } from "./AgentRuntimeCore.sys.mjs";
 import {
   AgentSupervisor,
   formatDirectorInstruction,
+  createEvidenceReader,
 } from "./AgentSupervisor.sys.mjs";
 import {
   assertAgentBackendsPort,
@@ -111,6 +112,8 @@ export class AgentTurnOrchestrator {
       recordUsage: null,
       objective: "",
       supervisedToolCalls: [],
+      supervisedStage: "DISCOVERY",
+      supervisedSegment: 0,
       previousDirectorDecision: null,
       toolContext: null,
     };
@@ -410,14 +413,24 @@ export class AgentTurnOrchestrator {
   }
 
   async _runSupervised(context) {
+    // Re-entry happens after user steering. Re-establish the P2 gate for the new direction.
+    if (context.supervisedSegment > 0) {
+      context.supervisedStage = "DISCOVERY";
+      context.supervisedToolCalls = [];
+    }
     let turnMessages = context.turnMessages;
     let reviewIndex = 0;
     let stalledReviews = 0;
     const recentReviews = [];
 
     for (;;) {
+      const stage = context.supervisedStage;
+      const scope = ++context.supervisedSegment;
+      const loopOptions = this._buildLoopOptions(context, turnMessages, { assist: true });
+      loopOptions.stageGate = { stage, scope, toolBudget: 20 };
+      loopOptions.systemPrompt = `${loopOptions.systemPrompt || ""}\n【Runtime 双模型调度约束（优先于自主连续执行要求）】当前阶段 ${stage}。DISCOVERY 只推进 P0/P1/P2 的采样、定位与验证，禁止宣称已获准进入实现。P2 完成必须调用 stage_checkpoint，引用工具返回的 Runtime evidenceId，分别列出已验证项与未验证项；普通文字或 phase 标记不构成批准。只有 Director 批准后 Runtime 才进入 IMPLEMENTATION。路线切换调用 ROUTE_CHANGE；交付验收调用 P6。每段最多 20 次实际工具派发，预算到点 Runtime 自动交接，不表示失败。同批 checkpoint 后续调用会被跳过。`;
       const result = await this.runAgentTurn(
-        this._buildLoopOptions(context, turnMessages, { assist: true })
+        loopOptions
       );
       if (!result || context.abortController.signal.aborted) {
         return result;
@@ -435,6 +448,12 @@ export class AgentTurnOrchestrator {
         reviewIndex,
         previousDecision: context.previousDirectorDecision,
       });
+      packet.stage = context.supervisedStage;
+      if (packet.stage === "DISCOVERY" && packet.trigger === "final_candidate") {
+        packet.trigger = "p2_required";
+      } else if (packet.stage !== "DISCOVERY" && packet.trigger === "final_candidate") {
+        packet.stage = "ACCEPTANCE";
+      }
       if (this.runtimeCore.hasSteering(context.state)) return result;
       const appliedSteering = context.state.steering.filter(item => item.status === "applied");
       packet.userSteering = {
@@ -454,6 +473,10 @@ export class AgentTurnOrchestrator {
       let { decision } = await this.supervisor.review({
         client: context.directorClient,
         packet,
+        readEvidence: args => {
+          if (context.abortController.signal.aborted || this.runtimeCore.hasSteering(context.state)) throw new Error("证据审阅已取消或被用户引导替代");
+          return createEvidenceReader(context.supervisedToolCalls)(args);
+        },
         executeTool: async (name, args) => {
           if (this.runtimeCore.hasSteering(context.state)) {
             throw new Error("用户已追加指令，旧方向验收暂停，等待 Worker 处理");
@@ -485,6 +508,7 @@ export class AgentTurnOrchestrator {
       const continuing = decision.action === "continue" || decision.action === "redirect";
       if (continuing) {
         const hasSuccessfulCall = (result.toolCalls || []).some(call => {
+          if (call.name === "stage_checkpoint" || call.skipped) return false;
           const env = call.env;
           const data = env?.data || env;
           return env?.ok === true && data?.ok !== false &&
@@ -492,9 +516,12 @@ export class AgentTurnOrchestrator {
             !data?.timedOut && !data?.aborted && !data?._truncated;
         });
         const stalled = decision.blocked || packet.worker.blocked ||
+          (packet.trigger === "p2_review" && !decision.p2Approved) ||
           packet.trigger === "final_candidate" || packet.trigger === "drift_recovery" ||
-          !hasSuccessfulCall;
-        stalledReviews = stalled ? stalledReviews + 1 : 0;
+          (packet.trigger !== "segment_budget" && !decision.p2Approved && !hasSuccessfulCall);
+        // Budget-only handoffs neither consume nor reset a blocker streak.
+        if (stalled) stalledReviews++;
+        else if (packet.trigger !== "segment_budget") stalledReviews = 0;
       }
       recentReviews.push({
         reviewIndex, trigger: packet.trigger, action: decision.action,
@@ -511,6 +538,11 @@ export class AgentTurnOrchestrator {
             : `已达到 ${this.supervisor.maxReviews} 次审阅上限，停止自动执行。最近判断：${decision.reason}`,
         };
       }
+      if (["continue", "redirect"].includes(decision.action)) {
+        if (decision.nextStage === "DISCOVERY") context.supervisedStage = "DISCOVERY";
+        else if (context.supervisedStage === "DISCOVERY" && decision.p2Approved === true) context.supervisedStage = "IMPLEMENTATION";
+      }
+      decision.runtimeStage = context.supervisedStage;
       context.previousDirectorDecision = decision;
       this.runtimeCore.applyEvent(context.state, {
         type: "director_decision",

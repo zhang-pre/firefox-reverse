@@ -342,6 +342,11 @@ export class AgentRuntimeCore {
             : [],
           finalAccepted: decision.finalAccepted === true,
           verificationRuns: decision.verificationRuns || [],
+          runtimeStage: decision.runtimeStage || "",
+          p2Approved: decision.p2Approved === true,
+          p2Review: decision.p2Review || null,
+          p2EvidenceRefs: decision.p2EvidenceRefs || [],
+          evidenceReads: decision.evidenceReads || [],
         };
       }
     }

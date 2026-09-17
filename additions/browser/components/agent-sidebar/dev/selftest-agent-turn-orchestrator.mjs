@@ -385,8 +385,9 @@ const supervised = makeHarness({
       delta: "worker phase one",
       result: {
         content:
-          "[WORKER_EVIDENCE]\nphase: P4\ncandidate_complete: false\n[/WORKER_EVIDENCE]",
-        stopReason: "final",
+          "P2 入口已有证据",
+        stopReason: "stage_checkpoint",
+        checkpoint: { phase: "P2", candidate: "signer", evidenceRefs: ["tool:1:1"], verified: ["入口"], unverified: ["独立运行"], proposedNextStep: "实现" },
         messages: [
           { role: "user", content: "build a verified client" },
           { role: "assistant", content: "phase P4" },
@@ -394,7 +395,8 @@ const supervised = makeHarness({
         toolCalls: [
           {
             id: "file-1",
-            name: "fs_write",
+            name: "page_eval",
+            evidenceId: "tool:1:1",
             args: { path: "out/solver.js" },
             env: { ok: true, data: { path: "out/solver.js" } },
           },
@@ -426,8 +428,11 @@ const supervised = makeHarness({
     },
   ],
   directorDecisions: [
+    { toolCalls: [{ id: "read-1", type: "function", function: { name: "evidence_read", arguments: JSON.stringify({ evidenceId: "tool:1:1" }) } }] },
     {
       action: "redirect",
+      nextStage: "IMPLEMENTATION",
+      p2Review: { entry: "调用链已确认", inputs: "真实输入", outputScope: "浏览器输出", stateAndEncoding: "仍需保留状态", limitations: "尚未独立实跑", evidenceRefs: ["tool:1:1"] },
       reason: "缺少真实接口成功响应",
       guidance: "运行独立脚本并保留 HTTP 状态与响应摘要",
       nextPhase: "P6",
@@ -461,13 +466,14 @@ await supervised.orchestrator.run("thread-supervised", {
 const supervisedState = supervised.core.getState("thread-supervised");
 check(
   "supervised mode is strictly sequential",
-  supervised.order.join(",") === "worker,director,worker,director,director-tool,director"
+  supervised.order.join(",") === "worker,director,director,worker,director,director-tool,director"
 );
 check(
   "Director only receives execution tools at final acceptance",
-  supervised.directorCalls.length === 3 &&
-    supervised.directorCalls[0].options.tools == null &&
-    supervised.directorCalls[1].options.tools.map(t => t.function.name).join(",") === "run_node,run_python"
+  supervised.directorCalls.length === 4 &&
+    supervised.directorCalls[0].options.tools[0].function.name === "evidence_read" &&
+    supervised.directorCalls[2].options.tools.map(t => t.function.name).join(",") === "run_node,run_python" &&
+    supervised.calls[0].stageGate.stage === "DISCOVERY" && supervised.calls[1].stageGate.stage === "IMPLEMENTATION"
 );
 check(
   "worker and Director use their selected model profiles",
@@ -492,7 +498,7 @@ check(
   "supervised segments and Director usage are persisted",
   supervised.messages.length === 2 &&
     supervised.usage.length === 1 &&
-    supervised.usage[0].requests === 3
+    supervised.usage[0].requests === 4
 );
 
 const blockedTurn = () => ({ result: {
@@ -535,6 +541,20 @@ check("overall review cap also produces a final Worker report", capped.calls.len
 const failedTools = makeHarness({ turns: Array.from({ length: 4 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false" } })), directorDecisions: Array.from({ length: 4 }, () => ({ ...rejection(), blocked: false })) });
 await failedTools.orchestrator.run("failed-tools", { supervised: true, workspaceRoot: "/work" });
 check("failed subprocess envelopes cannot reset the retry budget", failedTools.calls.length === 3 && failedTools.summaryCalls.length === 1);
+
+const p2Rejected = makeHarness({
+  turns: Array.from({ length: 4 }, () => ({ result: { content: "P2 complete", stopReason: "stage_checkpoint", checkpoint: { phase: "P2", evidenceRefs: ["tool:1:1"] }, toolCalls: [{ name: "page_eval", evidenceId: "tool:1:1", env: { ok: true, data: { output: "observed sample" } } }] } })),
+  directorDecisions: Array.from({ length: 4 }, () => ({ action: "continue", nextStage: "IMPLEMENTATION", reason: "相信 Worker 结论" })),
+});
+await p2Rejected.orchestrator.run("p2-rejected", { supervised: true, workspaceRoot: "/work" });
+check("summary-only P2 approval never transitions and stops after three rejections", p2Rejected.calls.length === 3 && p2Rejected.calls.every(c => c.stageGate.stage === "DISCOVERY") && p2Rejected.summaryCalls.length === 1);
+
+const budgetOnly = makeHarness({
+  turns: Array.from({ length: 4 }, () => ({ result: { content: "budget exhausted", stopReason: "segment_budget", toolCalls: [] } })),
+  directorDecisions: [rejection(), { action: "continue", reason: "继续采样" }, rejection(), rejection()],
+});
+await budgetOnly.orchestrator.run("budget-only", { supervised: true, workspaceRoot: "/work" });
+check("budget-only handoff neither increments nor resets blocked retry streak", budgetOnly.calls.length === 4 && budgetOnly.summaryCalls.length === 1);
 
 const failed = makeHarness({
   backendError: new Error("backend unavailable"),
