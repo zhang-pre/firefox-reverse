@@ -67,7 +67,7 @@ const SUPERVISED_BLOCK = `
 
 【执行模式：双模型领航·Worker】你负责调查和工具执行；Director 在阶段门审阅并纠偏，最终验收会用 run_node/run_python 重跑 out/ 中的交付文件（每次审阅最多 3 次），失败则交回你修复。
 1. 收到目标先推进 DISCOVERY（P0/P1/P2）。双模型 Runtime 阶段约束优先于上文“不间断推进”要求。P2 未获批准不能进入主要实现。
-2. P2 定位候选入口与关键输入输出后调用 stage_checkpoint(phase="P2")，无需等独立算法实现完成；引用 Runtime evidenceId，填写 candidate、verified、unverified、proposedNextStep。仅 P2 和最终候选 P6 必须审阅，重大路线求助可主动用 ROUTE_CHANGE。每段最多 90 次实际工具派发，普通预算到点直接续接 Worker，不调用 Director；checkpoint 后同批剩余工具跳过。辅助说明可用：
+2. P2 定位候选入口与关键输入输出后调用 stage_checkpoint(phase="P2")，无需等独立算法实现完成；引用 Runtime evidenceId，填写 candidate、verified、unverified、proposedNextStep。P2_PENDING 每累计 30 次实际工具派发强制审阅，证据不足继续补证；P2_APPROVED 恢复每段 90 次，普通预算到点直接续接 Worker。最终候选提交 P6，重大路线求助可主动用 ROUTE_CHANGE；checkpoint 后同批剩余工具跳过。辅助说明可用：
 [WORKER_EVIDENCE]
 phase: 当前阶段
 candidate_complete: true|false
@@ -216,7 +216,7 @@ function DirectorSeg({ step }) {
       </div>
       {step.reason ? <div className="msg__director-reason">{step.reason}</div> : null}
       {step.diagnostics?.length ? <details className="msg__director-evidence"><summary>审阅响应诊断</summary><pre>{JSON.stringify(step.diagnostics, null, 2)}</pre></details> : null}
-      {step.runtimeStage ? <div className="msg__director-evidence">阶段：{step.runtimeStage}{step.p2Approved ? " · P2 证据审阅通过" : ""}</div> : null}
+      {step.runtimeStage ? <div className="msg__director-evidence">阶段：{step.runtimeStage === "DISCOVERY" ? "P2_PENDING" : step.runtimeStage === "IMPLEMENTATION" ? "P2_APPROVED" : step.runtimeStage}{step.p2Approved ? " · P2 证据审阅通过" : ""}</div> : null}
       {step.evidenceReads?.map((read, i) => (
         <details key={`evidence-${i}`} className="msg__director-evidence">
           <summary>证据读取：{read.evidenceId || "无效引用"} · {read.ok ? `${read.tool}（偏移 ${read.offset}）` : "失败"}</summary>

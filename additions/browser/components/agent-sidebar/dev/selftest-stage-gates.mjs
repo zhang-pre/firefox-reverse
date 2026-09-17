@@ -50,6 +50,14 @@ h = await loop([[call("a"), call("b")], []], { stageGate: null });
 assert.equal(h.dispatched.length, 2);
 assert.ok(!h.requests[0].tools.some(t => t.function.name === "stage_checkpoint"), "ordinary modes unchanged");
 
+let dispatchCount = 0;
+h = await loop([Array.from({ length: 35 }, (_, i) => call(`pending-${i}`))], { stageGate: { stage: "DISCOVERY", scope: 1, toolBudget: 30, onDispatch: () => dispatchCount++ } });
+assert.equal(h.dispatched.length, 30);
+assert.equal(dispatchCount, 30, "runtime counter only observes actual dispatch, not skipped tail");
+assert.equal(h.result.messages.filter(m => m.role === "tool").length, 35);
+h = await loop([[call("denied")], []], { router: { listSpecs: () => [], needsConfirm: () => true, dispatch: async () => { throw new Error("must not dispatch"); } }, onConfirm: async () => false, autoApprove: false, stageGate: { stage: "DISCOVERY", scope: 1, toolBudget: 30, onDispatch: () => dispatchCount++ } });
+assert.equal(dispatchCount, 30, "denied tool does not consume dispatch budget");
+
 const records = [
   { evidenceId: "tool:1:1", name: "page_eval", args: { expression: "r(t,o)" }, env: { ok: true, data: { output: "observed:" + "x".repeat(8000) } } },
   { evidenceId: "tool:1:2", name: "fs_write", args: { path: "out/main.js" }, env: { ok: true, data: { content: "algorithm proven" } } },

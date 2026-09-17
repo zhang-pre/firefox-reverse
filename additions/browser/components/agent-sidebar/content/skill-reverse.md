@@ -70,6 +70,7 @@ signer_trace/webapi_trace 必须 **arm → clear → 只触发一次新请求 �
 
 **2. P1 定位生成点**：`net_get` 的 `initiatorStack` 直接给"谁拼了这个参数"的调用栈（栈为 null 就页内交互重触发）。`scripts_capture_all` 落盘 → `code_search(参数名/signer特征, scriptUrl)` 摸到 signer 脚本 → `scripts_save(url, toWorkspace:true)` 落到 `scripts/`。
 
+<!-- runtime-p2-policy -->
 **3. P2 先验证再逆向（关键，别跳）**：在浏览器内 `page_eval` 调到候选 signer，给已知输入取输出，和 P0 真实样本**逐字节 diff**。
 - **wire 参数常 ≠ 最显眼 signer 的输出**（常见 `wire = wrapper(signer输出, 其它字段)`）。格式/长度/前缀对不上＝没找对，顺调用栈往上层找真正拼装 wire 值的函数。**没 diff 对上之前，别进字节码反汇编。**
 - **字节长度先速判**：写复刻代码前，先比「你假设的算法输出字节数」和「真实 wire 值解码后的字节数」——对不上（如假设 HMAC-SHA256＝32 字节、但 wire 解码后是 75 字节）就**立刻否决该假设、换方向**，别写一堆代码白验证。长度/前缀这种廉价信号能在 30 秒内排除大半错误假设。

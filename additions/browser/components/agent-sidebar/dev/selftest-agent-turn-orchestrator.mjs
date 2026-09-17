@@ -169,6 +169,7 @@ function makeHarness({
       order.push("worker");
       calls.push(options);
       const turn = turns.shift() || { result: { content: "", stopReason: "final" } };
+      for (let i = 0; i < (turn.dispatches || 0); i++) options.stageGate?.onDispatch?.();
       if (turn.delta) {
         options.onDelta(turn.delta);
       }
@@ -550,11 +551,11 @@ await p2Rejected.orchestrator.run("p2-rejected", { supervised: true, workspaceRo
 check("summary-only P2 approval never transitions and stops after three rejections", p2Rejected.calls.length === 3 && p2Rejected.calls.every(c => c.stageGate.stage === "DISCOVERY") && p2Rejected.summaryCalls.length === 1);
 
 const budgetOnly = makeHarness({
-  turns: [blockedTurn(), { result: { content: "budget exhausted", stopReason: "segment_budget", messages: [{ role: "tool", content: "preserved evidence" }], toolCalls: [{ name: "page_eval", env: { ok: true } }] } }, blockedTurn(), blockedTurn()],
+  turns: [blockedTurn(), { result: { content: "round limit", stopReason: "max_rounds", messages: [{ role: "tool", content: "preserved evidence" }], toolCalls: [{ name: "page_eval", env: { ok: true } }] } }, blockedTurn(), blockedTurn()],
   directorDecisions: [rejection(), rejection(), rejection()],
 });
 await budgetOnly.orchestrator.run("budget-only", { supervised: true, workspaceRoot: "/work" });
-check("budget-only resumes Worker without Director or resetting blocked streak", budgetOnly.calls.length === 4 && budgetOnly.directorCalls.length === 3 && budgetOnly.summaryCalls.length === 1 && budgetOnly.calls[2].messages.some(m => m.content === "preserved evidence") && budgetOnly.calls.every(c => c.stageGate.toolBudget === 90));
+check("early ordinary segment resumes Worker without resetting blocked streak", budgetOnly.calls.length === 4 && budgetOnly.directorCalls.length === 3 && budgetOnly.summaryCalls.length === 1 && budgetOnly.calls[2].messages.some(m => m.content === "preserved evidence") && budgetOnly.calls.every(c => c.stageGate.toolBudget === 30));
 
 const protocolFailure = makeHarness({ turns: [blockedTurn()], directorDecisions: [{ response: { content: "not JSON", finishReason: "stop" } }, { response: { content: "still not JSON", finishReason: "stop" } }] });
 await protocolFailure.orchestrator.run("review-error", { supervised: true, workspaceRoot: "/work" });
@@ -571,6 +572,26 @@ const lateP2 = makeHarness({
 });
 await lateP2.orchestrator.run("late-p2", { supervised: true, workspaceRoot: "/work" });
 check("late P2 and final verification finish in one review without Worker replay", lateP2.calls.length === 1 && lateP2.directorCalls.length === 4 && lateP2.summaryCalls.length === 0 && lateP2.statuses.at(-1).status === "completed" && lateP2.core.getState("late-p2").steps.some(s => s.finalAccepted && s.p2Approved && s.runtimeStage === "ACCEPTANCE"));
+
+const budgetGate = makeHarness({
+  turns: [
+    { dispatches: 12, result: { content: "candidate_complete: false", stopReason: "max_rounds", toolCalls: [{ name: "page_eval", evidenceId: "tool:1:1", env: { ok: true, data: { output: "oracle" } } }] } },
+    { dispatches: 18, result: { content: "budget", stopReason: "segment_budget", toolCalls: [] } },
+    { dispatches: 90, result: { content: "budget", stopReason: "segment_budget", toolCalls: [{ name: "page_eval", env: { ok: true } }] } },
+    { result: { content: "candidate_complete: true", stopReason: "final", toolCalls: [] } },
+  ],
+  directorDecisions: [
+    { toolCalls: [{ id: "read", function: { name: "evidence_read", arguments: JSON.stringify({ evidenceId: "tool:1:1" }) } }] },
+    { action: "continue", reason: "入口已有证据", nextStage: "IMPLEMENTATION", p2Review: { entry: "sign", inputs: "ts", outputScope: "wire", stateAndEncoding: "已对齐", limitations: "尚待实现", evidenceRefs: ["tool:1:1"] } },
+    { action: "ask_user", reason: "缺凭据" },
+  ],
+});
+await budgetGate.orchestrator.run("budget-gate", { supervised: true, workspaceRoot: "/work" });
+check("pending budget accumulates across segments, then approval restores 90 without extra review", budgetGate.calls.map(c => c.stageGate.toolBudget).join(",") === "30,18,90,90" && budgetGate.directorCalls.length === 3 && budgetGate.order.slice(0,7).join(",") === "worker,worker,director,director,worker,worker,director");
+check("skill context and prompt track Runtime P2 state", budgetGate.calls[0].toolCtx.p2Status === "P2_PENDING" && budgetGate.calls[2].toolCtx.p2Status === "P2_APPROVED" && budgetGate.calls[2].systemPrompt.includes("P2_APPROVED"));
+const insufficient = makeHarness({ turns: Array.from({ length: 3 }, () => ({ dispatches: 30, result: { content: "budget", stopReason: "segment_budget", toolCalls: [] } })), directorDecisions: [{ action: "continue", reason: "还缺真实输入" }, { action: "continue", reason: "补一次对照" }, { action: "ask_user", reason: "缺访问权限" }] });
+await insufficient.orchestrator.run("insufficient", { supervised: true, workspaceRoot: "/work" });
+check("insufficient evidence retains pending and grants only another 30", insufficient.calls.length === 3 && insufficient.calls.every(c => c.stageGate.toolBudget === 30 && c.toolCtx.p2Status === "P2_PENDING") && insufficient.directorCalls.length === 3);
 
 const failed = makeHarness({
   backendError: new Error("backend unavailable"),

@@ -318,7 +318,13 @@ export class SkillRegistry {
         return { ok: false, error: `未找到 Skill "${name}"；先调用 skill_list 查看可用名称` };
       }
       if (descriptor.source === "builtin") {
-        const fullSkill = await this._readBuiltin();
+        let fullSkill = await this._readBuiltin();
+        const p2Policy = ctx.p2Status === "P2_PENDING"
+          ? "【双模型 · P2_PENDING】候选入口已定位，取得一组可引用的输入/输出、cookie 写入或请求关联证据后，下一步先调用 stage_checkpoint(phase=P2)。缺口写 unverified；不要等完整算法、独立产物、README 或多页测试完成。此时审批的是继续路线，不是最终交付。Runtime 最迟每累计 30 次实际工具派发强制审阅，未通过则继续补证。\n"
+          : ctx.p2Status === "P2_APPROVED"
+          ? "【双模型 · P2_APPROVED】本轮已通过 P2，以下为方法论参考，不要求重复交接。继续实现到最终验收；普通工具段预算为 90 次，耗尽直接续接 Worker。\n"
+          : "";
+        fullSkill = fullSkill.replace("<!-- runtime-p2-policy -->", p2Policy);
         const chunk = chunkText(fullSkill, params);
         let templates = [];
         try { templates = await this._releaseTemplates(ctx); } catch {}
@@ -327,6 +333,7 @@ export class SkillRegistry {
           name: descriptor.name,
           description: descriptor.description,
           source: descriptor.source,
+          ...(p2Policy ? { runtimePolicy: p2Policy.trim() } : {}),
           skill: chunk.text,
           totalChars: chunk.totalChars,
           offset: chunk.offset,

@@ -61,6 +61,16 @@ ok(resource.ok && resource.content.includes("已授权"), "读取 Skill 文本�
 const escaped = await registry.readResource({ name: "api-audit", path: "../secret.txt" }, { workspaceRoot: workspace });
 ok(!escaped.ok, "拒绝越过 Skill 根目录的路径");
 
+registry._builtinCache = await fs.readFile(new URL("../content/skill-reverse.md", import.meta.url), "utf8");
+registry._releaseTemplates = async () => [];
+const ordinary = await registry.get({ name: "reverse", limit: 100000 });
+const pending = await registry.get({ name: "reverse", limit: 100000 }, { p2Status: "P2_PENDING" });
+const approved = await registry.get({ name: "reverse", limit: 100000 }, { p2Status: "P2_APPROVED" });
+ok(!ordinary.runtimePolicy && !ordinary.skill.includes("P2_PENDING"), "普通模式不注入双模型规则");
+ok(pending.runtimePolicy.includes("30") && pending.skill.indexOf("P2_PENDING") < pending.skill.indexOf("**3. P2"), "P2 附近注入等待规则并保留显式元数据");
+ok(approved.runtimePolicy.includes("90") && !approved.skill.includes("P2_PENDING"), "批准后注入 APPROVED 而非重复等待");
+ok(!registry._builtinCache.includes("P2_PENDING"), "模式注入不污染通用 Skill 缓存");
+
 await fs.rm(tmp, { recursive: true, force: true });
 console.log(`\nSkillRegistry 自测：${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

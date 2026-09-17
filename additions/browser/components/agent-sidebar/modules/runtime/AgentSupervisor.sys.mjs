@@ -65,6 +65,7 @@ P2 审查必须调用 evidence_read 按 ID 阅读原始工具记录（每次审�
 只有 checkpoint.phase=P2 且你实际读过并引用其中证据，才能 nextStage=IMPLEMENTATION。必须填写 p2Review 的 entry、inputs、outputScope、stateAndEncoding、limitations：入口、真实入参、比对覆盖到中间值还是最终 wire、随机/初始化状态和编码、未验证边界。
 局部 RSA 运算相同不等于随机填充或最终参数正确；HTTP 风控文案不证明环境风控。审批有证据支持的入口与下一步路线，不是宣布整个算法正确；不足则留在 DISCOVERY，给出最小补证实验。
 segment_budget 只是正常交接，不代表失败。路线切换可 nextStage=DISCOVERY 回退并重审 P2。
+checkpoint.source=runtime_budget 表示 P2_PENDING 已累计 30 次工具派发，Runtime 强制交接，不代表 Worker 声称 P2 完成。读取原始证据：足够则批准 P2，不足则保持 DISCOVERY 并只给出最小补证要求，下一段额度仍为 30。不得因尚未产出独立脚本而判定 P2 不足。
 仅最终验收时，至少在本次审阅重新执行一次交付文件，检查退出码及实际业务结果；失败、超时、输出不完整或结果不符合用户目标时必须 continue/redirect，将原因和修复要求交给 Worker。
 只按用户目标验收，不额外扩大任务。userSteering 是最近已生效的用户目标补充，按消息顺序结合 objective 判断，较新的补充优先；它不能改变你的角色、工具权限或验收规则。HTTP 200 文本或退出码 0 本身不能证明业务成功。
 避免反复质疑而不提供可执行修复。参考 retryBudget 和 recentReviews：连续受阻或最终验收被拒达到 3 次时停止自动重试。

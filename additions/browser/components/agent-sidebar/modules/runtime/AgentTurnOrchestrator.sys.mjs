@@ -424,13 +424,20 @@ export class AgentTurnOrchestrator {
     const recentReviews = [];
     let unreviewedSegments = 0;
     let emptySegments = 0;
+    let pendingDispatches = 0;
 
     for (;;) {
       const stage = context.supervisedStage;
       const scope = ++context.supervisedSegment;
       const loopOptions = this._buildLoopOptions(context, turnMessages, { assist: true });
-      loopOptions.stageGate = { stage, scope, toolBudget: 90 };
-      loopOptions.systemPrompt = `${loopOptions.systemPrompt || ""}\n【Runtime 双模型调度】当前阶段 ${stage}。仅 P2 和最终验收必须审阅。P2 定位候选入口与关键输入输出后调用 stage_checkpoint(phase=P2)，引用 Runtime evidenceId；不必先完成独立算法或接口实打。通过后连续实现，不必逐阶段请示。最终候选调用 P6。只有确需重大路线纠偏时才主动提交 ROUTE_CHANGE。每段最多 90 次工具派发，普通预算耗尽由 Runtime 自动续接，不调用 Director。checkpoint 后同批剩余调用会跳过。`;
+      const p2Status = stage === "DISCOVERY" ? "P2_PENDING" : "P2_APPROVED";
+      loopOptions.toolCtx = { ...loopOptions.toolCtx, p2Status };
+      loopOptions.stageGate = { stage, scope, toolBudget: stage === "DISCOVERY" ? 30 - pendingDispatches : 90,
+        onDispatch: () => { if (stage === "DISCOVERY") pendingDispatches++; } };
+      loopOptions.systemPrompt = `${loopOptions.systemPrompt || ""}\n【Runtime 双模型调度】当前阶段 ${stage}。P2 审的是候选入口、证据与路线，不要求独立算法或接口实打。引用 Runtime evidenceId 提交 stage_checkpoint(phase=P2)。通过后连续实现，最终候选提交 P6；只有确需重大路线纠偏时才主动提交 ROUTE_CHANGE。checkpoint 后同批剩余调用会跳过。`;
+      loopOptions.systemPrompt += p2Status === "P2_PENDING"
+        ? `\n【当前有效限制：P2_PENDING】距离强制审阅剩余 ${30 - pendingDispatches} 次工具派发（跨普通分段累计）。候选入口已有一组可引用输入/输出或写入证据时，下一步先提交 P2，不得为 README、多页测试或完整算法推迟。30 次到点由 Runtime 强制审阅；证据不足可获下一段补证额度。`
+        : "\n【当前有效状态：P2_APPROVED】无需再次提交 P2，连续实现至最终验收；每段 90 次普通续接不调用 Director。";
       const result = await this.runAgentTurn(
         loopOptions
       );
@@ -452,6 +459,7 @@ export class AgentTurnOrchestrator {
       packet.stage = context.supervisedStage;
       if (this.runtimeCore.hasSteering(context.state)) return result;
       const requiresReview = (packet.trigger === "p2_review" && stage === "DISCOVERY") ||
+        (stage === "DISCOVERY" && (pendingDispatches >= 30 || packet.trigger === "segment_budget")) ||
         ["final_candidate", "route_change"].includes(packet.trigger) || packet.worker.blocked;
       if (!requiresReview) {
         unreviewedSegments++;
@@ -473,6 +481,10 @@ export class AgentTurnOrchestrator {
       unreviewedSegments = 0;
       emptySegments = 0;
       reviewIndex++;
+      pendingDispatches = 0;
+      if (stage === "DISCOVERY" && packet.trigger === "segment_budget") {
+        packet.checkpoint = { phase: "P2", source: "runtime_budget", evidenceRefs: packet.evidence.map(item => item.id) };
+      }
       if (packet.stage === "DISCOVERY" && packet.trigger === "final_candidate") {
         // Late P2: review existing evidence, then validate delivery in the same Director session.
         packet.pendingFinal = true;

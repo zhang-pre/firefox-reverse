@@ -152,13 +152,23 @@ Runtime scheduling starts each supervised run in DISCOVERY. Worker submits
 `stage_checkpoint` with phase P2, ROUTE_CHANGE, or P6, candidate, evidenceRefs,
 verified/unverified claims, and proposedNextStep. A valid checkpoint immediately
 yields to Director; remaining calls in the same batch receive skipped replies
-without execution. Each segment allows 90 actual Router dispatches. Ordinary
-budget, no-tool, max_rounds and drift returns resume Worker with its message/tool
-history intact, without calling Director. Only P2 and final delivery mandate
-review; explicit ROUTE_CHANGE requests and reported blockers may also request
+without execution. DISCOVERY exposes P2_PENDING and permits at most 30 actual
+Router dispatches before mandatory review, accumulated across ordinary segments.
+At budget exhaustion Runtime supplies a P2 checkpoint selecting captured evidence;
+Director may approve after reading evidence, or grant another 30-call discovery
+window when evidence is insufficient. This guarantees timely review, not automatic
+semantic detection of P2. Approval exposes P2_APPROVED and restores 90 dispatches
+per segment; ordinary budget returns then resume Worker without Director. Earlier
+no-tool, max_rounds and drift returns preserve messages and the pending counter.
+Explicit ROUTE_CHANGE requests and reported blockers may also request
 Director help. Repeated P2 checkpoints after approval do not cause re-review.
 Twelve consecutive unreviewed segments or three empty segments stop with a
 report-only Worker summary, preventing unlimited automatic continuation.
+The common reverse Skill contains only a P2 insertion marker. SkillBackend injects
+mode/state-specific policy before pagination, beside P2, without mutating its cached
+methodology. Ordinary modes receive no supervision policy. The policy is also
+returned as metadata so result folding cannot hide the active state. Runtime's
+current system instruction takes precedence over older Skill reads in history.
 
 DISCOVERY cannot advance to IMPLEMENTATION unless a P2 checkpoint is present,
 Director actually reads selected evidence, and its continue/redirect decision

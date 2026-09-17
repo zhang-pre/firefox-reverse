@@ -604,10 +604,11 @@ export async function runAgentTurn(p) {
         emit({ type: "confirm_result", name, id: tc.id, approved: !!approved });
         approved = approved && !signal?.aborted && !hasSteering();
         env = approved
-          ? (dispatched++, await router.dispatch(name, args, toolCtx))
+          ? (dispatched++, stageGate?.onDispatch?.(), await router.dispatch(name, args, toolCtx))
           : { ok: false, error: "user denied tool execution", denied: true };
       } else {
         dispatched++;
+        stageGate?.onDispatch?.();
         env = await router.dispatch(name, args, toolCtx);
       }
 
