@@ -85,4 +85,24 @@ assert.ok(result.decision.verificationRuns[0].error.includes("process unavailabl
 
 const controller = new AbortController();
 await assert.rejects(run([{ toolCalls: [call(), call()] }], () => { controller.abort(); return success; }, "final_candidate", controller), /aborted/);
-console.log("AgentSupervisor selftest: all passed (fresh execution, Node/Python, rejection, budgets, scope, cancellation)");
+result = await run([{ content: "not JSON", finishReason: "stop" }, { content: "still not JSON", finishReason: "stop" }]);
+assert.equal(result.decision.action, "review_error");
+assert.equal(result.requests.length, 2);
+assert.equal(result.decision.diagnostics.length, 2);
+assert.equal(result.decision.verificationRuns.length, 0);
+
+result = await run([{ toolCalls: [call()], content: "partial", finishReason: "length", reasoningContent: "thought" }, { toolCalls: [call()] }]);
+assert.equal(result.executed.length, 1, "truncated tool calls are never executed");
+assert.equal(result.requests[0].options.maxTokens, 4096);
+assert.equal(result.requests[1].options.maxTokens, 8192);
+assert.equal(result.decision.finalAccepted, true);
+assert.equal(result.decision.diagnostics[0].reasoningLength, 7);
+
+result = await run([{ content: "", finishReason: "length" }, { content: "", finishReason: "length" }]);
+assert.equal(result.decision.action, "review_error");
+assert.equal(result.requests.length, 2);
+
+const requestError = await new AgentSupervisor().review({ packet: { stage: "DISCOVERY" }, client: { async chat() { throw new Error("provider unavailable"); } } });
+assert.equal(requestError.decision.action, "review_error");
+assert.equal(requestError.decision.diagnostics[0].kind, "request_error");
+console.log("AgentSupervisor selftest: all passed (execution guards, protocol failure, truncation, diagnostics)");

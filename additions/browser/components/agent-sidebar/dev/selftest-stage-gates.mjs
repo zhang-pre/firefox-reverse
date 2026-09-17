@@ -14,8 +14,8 @@ async function loop(batches, options = {}) {
     } },
     router: { listSpecs: () => [{ type: "function", function: { name: "page_eval", parameters: { type: "object" } } }], needsConfirm: () => false,
       async dispatch(name) { dispatched.push(name); return { ok: true, data: { output: "sample matched" } }; } },
-    messages: [{ role: "user", content: "test" }], maxRounds: 50, assist: true,
-    stageGate: { stage: "DISCOVERY", scope: 1, toolBudget: 20 },
+    messages: [{ role: "user", content: "test" }], maxRounds: 120, assist: true,
+    stageGate: { stage: "DISCOVERY", scope: 1, toolBudget: 90 },
     ...options,
   });
   return { result, dispatched, requests };
@@ -31,16 +31,16 @@ assert.equal(JSON.parse(h.result.messages.at(-1).content).skipped, true);
 assert.equal(h.result.toolCalls[0].evidenceId, "tool:1:1");
 assert.ok(h.result.messages.find(m => m.tool_call_id === "a").content.includes("tool:1:1"));
 
-h = await loop([Array.from({ length: 25 }, (_, i) => call(`batch-${i}`))]);
+h = await loop([Array.from({ length: 95 }, (_, i) => call(`batch-${i}`))]);
 assert.equal(h.result.stopReason, "segment_budget");
-assert.equal(h.dispatched.length, 20);
-assert.equal(h.result.messages.filter(m => m.role === "tool").length, 25);
-assert.equal(h.result.toolCalls.length, 20, "skipped tail is not evidence");
+assert.equal(h.dispatched.length, 90);
+assert.equal(h.result.messages.filter(m => m.role === "tool").length, 95);
+assert.equal(h.result.toolCalls.length, 90, "skipped tail is not evidence");
 assert.equal(h.requests.length, 1);
 
-h = await loop(Array.from({ length: 25 }, (_, i) => [call(`round-${i}`)]));
-assert.equal(h.dispatched.length, 20);
-assert.equal(h.requests.length, 20);
+h = await loop(Array.from({ length: 95 }, (_, i) => [call(`round-${i}`)]));
+assert.equal(h.dispatched.length, 90);
+assert.equal(h.requests.length, 90);
 
 h = await loop([[call("bad", "stage_checkpoint", { phase: "P2" }), call("a")], []]);
 assert.equal(h.result.stopReason, "final");
@@ -91,4 +91,24 @@ review = await new AgentSupervisor().review({ packet, readEvidence: args => { at
   return n++ === 0 ? { toolCalls: [call("r1", "evidence_read", { evidenceId: "tool:1:1" }), call("r2", "evidence_read", { evidenceId: "tool:1:1", offset: 100 }), call("r3", "evidence_read", { evidenceId: "tool:1:1" })] } : { content: JSON.stringify(approval) };
 } } });
 assert.equal(attempts, 2, "read budget is enforced across batch");
-console.log("Stage gates: PASS (hard yield, batch protocol, 20-call budgets, raw evidence, P2 approval guards)");
+const finalDecision = { action: "finish", reason: "真实业务响应符合目标", finalAcceptance: { independentArtifactVerified: true, liveRequestVerified: true, evidenceRefs: ["director:1:1"] } };
+const combinedResponses = [
+  { toolCalls: [call("read", "evidence_read", { evidenceId: "tool:1:1" })] },
+  { content: JSON.stringify(approval) },
+  { toolCalls: [call("execute", "run_node", { file: "out/main.js" })] },
+  { content: JSON.stringify(finalDecision) },
+];
+const combinedTools = [];
+let executed = 0;
+review = await new AgentSupervisor().review({ packet: { ...packet, pendingFinal: true, trigger: "final_candidate", reviewIndex: 1 }, readEvidence,
+  executeTool: async () => { executed++; return { ok: true, data: { ok: true, exitCode: 0, output: 'HTTP 200 {"data":[1]}' } }; },
+  client: { async chat(messages, options) { combinedTools.push(options.tools?.map(t => t.function.name)); return combinedResponses.shift(); } },
+});
+assert.equal(review.decision.finalAccepted, true);
+assert.equal(review.decision.p2Approved, true);
+assert.equal(executed, 1);
+assert.deepEqual(combinedTools[0], ["evidence_read"]);
+assert.deepEqual(combinedTools[2], ["run_node", "run_python"]);
+assert.equal(review.decision.evidenceReads.length, 1);
+
+console.log("Stage gates: PASS (90-call budgets, raw evidence, P2 guards, combined P2/final acceptance)");

@@ -422,13 +422,15 @@ export class AgentTurnOrchestrator {
     let reviewIndex = 0;
     let stalledReviews = 0;
     const recentReviews = [];
+    let unreviewedSegments = 0;
+    let emptySegments = 0;
 
     for (;;) {
       const stage = context.supervisedStage;
       const scope = ++context.supervisedSegment;
       const loopOptions = this._buildLoopOptions(context, turnMessages, { assist: true });
-      loopOptions.stageGate = { stage, scope, toolBudget: 20 };
-      loopOptions.systemPrompt = `${loopOptions.systemPrompt || ""}\n【Runtime 双模型调度约束（优先于自主连续执行要求）】当前阶段 ${stage}。DISCOVERY 只推进 P0/P1/P2 的采样、定位与验证，禁止宣称已获准进入实现。P2 完成必须调用 stage_checkpoint，引用工具返回的 Runtime evidenceId，分别列出已验证项与未验证项；普通文字或 phase 标记不构成批准。只有 Director 批准后 Runtime 才进入 IMPLEMENTATION。路线切换调用 ROUTE_CHANGE；交付验收调用 P6。每段最多 20 次实际工具派发，预算到点 Runtime 自动交接，不表示失败。同批 checkpoint 后续调用会被跳过。`;
+      loopOptions.stageGate = { stage, scope, toolBudget: 90 };
+      loopOptions.systemPrompt = `${loopOptions.systemPrompt || ""}\n【Runtime 双模型调度】当前阶段 ${stage}。仅 P2 和最终验收必须审阅。P2 定位候选入口与关键输入输出后调用 stage_checkpoint(phase=P2)，引用 Runtime evidenceId；不必先完成独立算法或接口实打。通过后连续实现，不必逐阶段请示。最终候选调用 P6。只有确需重大路线纠偏时才主动提交 ROUTE_CHANGE。每段最多 90 次工具派发，普通预算耗尽由 Runtime 自动续接，不调用 Director。checkpoint 后同批剩余调用会跳过。`;
       const result = await this.runAgentTurn(
         loopOptions
       );
@@ -437,7 +439,6 @@ export class AgentTurnOrchestrator {
       }
 
       context.supervisedToolCalls.push(...(result.toolCalls || []));
-      reviewIndex++;
       const packet = this.supervisor.buildEvidencePacket({
         objective: context.objective,
         result: {
@@ -445,12 +446,38 @@ export class AgentTurnOrchestrator {
           toolCalls: context.supervisedToolCalls,
         },
         ledgerDigest: await this._ledgerDigest(context),
-        reviewIndex,
+        reviewIndex: reviewIndex + 1,
         previousDecision: context.previousDirectorDecision,
       });
       packet.stage = context.supervisedStage;
+      if (this.runtimeCore.hasSteering(context.state)) return result;
+      const requiresReview = (packet.trigger === "p2_review" && stage === "DISCOVERY") ||
+        ["final_candidate", "route_change"].includes(packet.trigger) || packet.worker.blocked;
+      if (!requiresReview) {
+        unreviewedSegments++;
+        emptySegments = result.toolCalls?.length ? 0 : emptySegments + 1;
+        if (unreviewedSegments >= 12 || emptySegments >= 3) {
+          return this._summarizeSupervisedStop(context, result, packet, {
+            action: "stop", finalAccepted: false,
+            reason: "Worker 连续执行达到安全上限或连续空转；保留已有结果，等待用户继续。",
+          });
+        }
+        await this._persist(context.threadId, result.content || "（Worker 自动续接）", context.state.steps);
+        this._startNextSegment(context.state);
+        turnMessages = (result.messages || turnMessages).filter(message => message && message.role !== "system");
+        turnMessages.push({ role: "user", content: stage === "DISCOVERY"
+          ? "Runtime 自动续接（未调用 Director）。沿现有证据继续；候选入口、输入输出已定位时提交 P2 checkpoint，不要等最终脚本完成才提交。"
+          : "Runtime 自动续接（未调用 Director）。P2 批准仍有效，继续当前实现；完成后提交 P6，勿重复总结。" });
+        continue;
+      }
+      unreviewedSegments = 0;
+      emptySegments = 0;
+      reviewIndex++;
       if (packet.stage === "DISCOVERY" && packet.trigger === "final_candidate") {
-        packet.trigger = "p2_required";
+        // Late P2: review existing evidence, then validate delivery in the same Director session.
+        packet.pendingFinal = true;
+        packet.checkpoint = { ...(packet.checkpoint || {}), phase: "P2",
+          evidenceRefs: packet.checkpoint?.evidenceRefs?.length ? packet.checkpoint.evidenceRefs : packet.evidence.map(item => item.id) };
       } else if (packet.stage !== "DISCOVERY" && packet.trigger === "final_candidate") {
         packet.stage = "ACCEPTANCE";
       }
@@ -542,6 +569,7 @@ export class AgentTurnOrchestrator {
         if (decision.nextStage === "DISCOVERY") context.supervisedStage = "DISCOVERY";
         else if (context.supervisedStage === "DISCOVERY" && decision.p2Approved === true) context.supervisedStage = "IMPLEMENTATION";
       }
+      if (decision.finalAccepted) context.supervisedStage = "ACCEPTANCE";
       decision.runtimeStage = context.supervisedStage;
       context.previousDirectorDecision = decision;
       this.runtimeCore.applyEvent(context.state, {
@@ -552,6 +580,11 @@ export class AgentTurnOrchestrator {
       });
       this.runtimeCore.notify(context.state);
 
+      if (decision.action === "review_error") {
+        result.content = `${result.content || ""}\n\n【验收服务异常·未通过验收】${decision.reason} 已保留产物与证据；未要求 Worker 修改产物。修复模型配置或审阅服务后可重新验收。`;
+        result.stopReason = "review_error";
+        return result;
+      }
       if (decision.action === "finish" && decision.finalAccepted) {
         result.content = [
           result.content,
@@ -783,7 +816,7 @@ export class AgentTurnOrchestrator {
     await this._persist(threadId, state.content, state.steps);
     await this._setTurnStatus(
       threadId,
-      state.aborted ? "cancelled" : result?.stopReason === "blocked" ? "failed" : "completed"
+      state.aborted ? "cancelled" : ["blocked", "review_error"].includes(result?.stopReason) ? "failed" : "completed"
     );
   }
 

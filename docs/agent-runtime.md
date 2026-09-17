@@ -110,12 +110,14 @@ Worker and Director are never run in parallel:
 
 ```text
 Worker tools and reasoning
-  -> stage gate / limit / final candidate
+  -> P2 checkpoint / final candidate (optional explicit route help or blocker)
   -> bounded evidence packet
   -> Director strict JSON decision
      -> continue or redirect -> internal instruction -> next Worker segment
      -> ask_user            -> settle and return control to the user
      -> finish              -> code-level final acceptance -> settle
+     -> review_error        -> preserve artifacts, pause; no Worker repair
+Worker ordinary segment limit -> resume Worker directly, no Director
 ```
 
 DISCOVERY reviews expose only `evidence_read` (at most two reads per review),
@@ -132,7 +134,8 @@ thread-bound workspace/cancellation context. Only explicit `out/*.js`, `.mjs`,
 Each execution has a 30-second timeout. Director must not modify deliverables;
 it returns failures and requested corrections to Worker in its structured decision.
 
-The actions are `continue`, `redirect`, `finish`, `ask_user`, and `stop`. `finish`
+Model decisions are `continue`, `redirect`, `finish`, `ask_user`, and `stop`.
+Runtime additionally produces `review_error` for review service failures. `finish`
 requires at least one fresh successful Director execution, no failed/timed-out/
 aborted/truncated execution in this review, a reference to its `director:*`
 receipt, and Director's confirmation that the actual business response meets
@@ -149,9 +152,13 @@ Runtime scheduling starts each supervised run in DISCOVERY. Worker submits
 `stage_checkpoint` with phase P2, ROUTE_CHANGE, or P6, candidate, evidenceRefs,
 verified/unverified claims, and proposedNextStep. A valid checkpoint immediately
 yields to Director; remaining calls in the same batch receive skipped replies
-without execution. Even without a checkpoint, 20 actual Router dispatches force
-a segment_budget handoff, with no extra Worker summary request. Ordinary no-tool
-returns, max_rounds and drift still yield. Budget handoffs can precede P2.
+without execution. Each segment allows 90 actual Router dispatches. Ordinary
+budget, no-tool, max_rounds and drift returns resume Worker with its message/tool
+history intact, without calling Director. Only P2 and final delivery mandate
+review; explicit ROUTE_CHANGE requests and reported blockers may also request
+Director help. Repeated P2 checkpoints after approval do not cause re-review.
+Twelve consecutive unreviewed segments or three empty segments stop with a
+report-only Worker summary, preventing unlimited automatic continuation.
 
 DISCOVERY cannot advance to IMPLEMENTATION unless a P2 checkpoint is present,
 Director actually reads selected evidence, and its continue/redirect decision
@@ -159,7 +166,12 @@ requests IMPLEMENTATION with all five P2 assessment fields: entry, inputs,
 outputScope, stateAndEncoding, and limitations. Referenced receipts must be
 selected by the checkpoint and successfully read as reviewable evidence.
 Summary-only approval and premature finish are rejected. Only an implementation
-final candidate opens ACCEPTANCE and the existing final execution tools. Director
+final candidate opens ACCEPTANCE and the existing final execution tools. P2
+approves a candidate entry and route, not a complete independent implementation.
+For a final candidate that missed P2, Runtime selects existing evidence for a
+late P2 review. After a valid P2 decision, the same Director conversation moves
+to ACCEPTANCE and enables execution; Worker is not sent back to repeat exploration.
+Director
 can redirect to DISCOVERY, requiring renewed P2 approval. User steering restarts
 discovery and the evidence collection, so stale approvals do not govern new work.
 
@@ -177,7 +189,7 @@ This is a bounded retry policy, not automatic proof of progress or matching of
 root causes. Director sees the count and the last three decisions. It may return
 `stop` earlier for an evidenced unresolved constraint, or `ask_user` for missing
 input. The overall twelve-review cap remains as a fallback.
-Budget-only handoffs without a reported blocker neither increment nor reset the
+Budget-only continuations without a reported blocker neither increment nor reset the
 consecutive failure counter. Checkpoint acknowledgements do not count as successful
 exploration. Repeatedly rejected P2 checkpoints stop after three reviews.
 
@@ -187,6 +199,15 @@ failure evidence, deliverables/commands, uncertainties and conditions to resume.
 This report is never reviewed again by Director. If generation fails, existing
 evidence is preserved in a fallback report. The task is visibly incomplete and
 uses the existing `failed` turn status rather than marking acceptance successful.
+
+Review protocol failures are not artifact rejections. Director starts with a
+4,096-token response budget, with at most one format/truncation recovery on the
+same evidence. Truncation raises the retry budget to 8,192; truncated tool calls
+are not executed. Persistent invalid output, request failure, or exhausted review
+interaction budget produces review_error: preserve results and pause with failed
+status, without Worker repair or a paid summary call. UI retains bounded response
+previews, finishReason, content/reasoning lengths, usage, evidence reads and execution
+receipts for diagnosis. No automatic approval is granted on review failure.
 
 Evidence packets contain a clipped Worker summary, tool success statistics,
 bounded tool results, artifact paths, ledger digest, trigger, phase, and the

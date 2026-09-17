@@ -59,6 +59,8 @@ export const DIRECTOR_ACTIONS = Object.freeze([
 export const DIRECTOR_SYSTEM_PROMPT = `你是 Director，负责重大决策和最终验收，不补写调查事实，也不修改 Worker 的产物。
 普通阶段直接给决策。最终验收时可调用 run_node/run_python，每次审阅最多 3 次，只运行 out/ 中明确的交付文件，禁止修改文件或通过参数执行额外代码。
 Runtime 的 stage 为 DISCOVERY 时禁止 finish 或跳过 P2。Worker 的 verified/summary/ledger 是待核实陈述，不是证据。
+P2 只审批候选入口、关键输入输出与下一步路线，不要求已完成独立算法或真实接口成功；这些属于最终验收。不要把普通实现细节升级为新阶段门。
+pendingFinal=true 表示最终产物已提交但遗漏 P2：先读取现有证据并返回 P2 审批 JSON。Runtime 会在同一审阅中开放最终执行工具，无需让 Worker 重做探索。
 P2 审查必须调用 evidence_read 按 ID 阅读原始工具记录（每次审阅最多 2 次，可按 offset 分页），不获得任意文件或代码执行权限。
 只有 checkpoint.phase=P2 且你实际读过并引用其中证据，才能 nextStage=IMPLEMENTATION。必须填写 p2Review 的 entry、inputs、outputScope、stateAndEncoding、limitations：入口、真实入参、比对覆盖到中间值还是最终 wire、随机/初始化状态和编码、未验证边界。
 局部 RSA 运算相同不等于随机填充或最终参数正确；HTTP 风控文案不证明环境风控。审批有证据支持的入口与下一步路线，不是宣布整个算法正确；不足则留在 DISCOVERY，给出最小补证实验。
@@ -503,9 +505,9 @@ export class AgentSupervisor {
         },
       },
     }));
-    const canRead = packet.stage === "DISCOVERY" && typeof readEvidence === "function";
+    let canRead = packet.stage === "DISCOVERY" && typeof readEvidence === "function";
     const readTools = [{ type: "function", function: { name: "evidence_read", description: "按当前运行证据 ID 分页读取原始工具结果，不接受路径。每次审阅最多 2 次。", parameters: { type: "object", properties: { evidenceId: { type: "string" }, offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 6000 } }, required: ["evidenceId"], additionalProperties: false } } }];
-    const canExecute = (!packet.stage || packet.stage === "ACCEPTANCE") && packet.trigger === "final_candidate" && typeof executeTool === "function";
+    let canExecute = (!packet.stage || packet.stage === "ACCEPTANCE") && packet.trigger === "final_candidate" && typeof executeTool === "function";
     const messages = [
       { role: "system", content: DIRECTOR_SYSTEM_PROMPT },
       {
@@ -519,18 +521,45 @@ export class AgentSupervisor {
     let attempts = 0;
     let readAttempts = 0;
     let parseFailures = 0;
-    for (let turn = 0; turn < 6; turn++) {
+    let responseBudget = 4096;
+    let p2Decision = null;
+    const diagnostics = [];
+    const failure = () => ({ decision: {
+      action: "review_error", finalAccepted: false,
+      reason: `Director 审阅服务未返回有效决策：${lastError?.message || "审阅交互预算耗尽"}。不是产物验收失败。`,
+      guidance: "保留现有产物；暂停审阅，检查模型响应与配置。不要要求 Worker 修复产物。",
+      requiredEvidence: [], verificationRuns: packet.directorRuns,
+      evidenceReads: packet.evidenceReads, diagnostics,
+      ...(p2Decision ? { p2Approved: true, p2Review: p2Decision.p2Review, p2EvidenceRefs: p2Decision.p2EvidenceRefs } : {}),
+    }, raw: "" });
+    for (let turn = 0; turn < 9; turn++) {
       if (signal?.aborted) throw new Error("Director review aborted");
-      const response = await client.chat(messages, {
+      let response;
+      try { response = await client.chat(messages, {
         signal,
-        maxTokens: 1800,
+        maxTokens: responseBudget,
         cacheKey,
         ...(canRead && readAttempts < 2 ? { tools: readTools } : canExecute && attempts < 3 ? { tools } : {}),
-      });
+      }); } catch (error) {
+        if (signal?.aborted) throw error;
+        lastError = error;
+        diagnostics.push({ kind: "request_error", message: clip(error.message, 1000) });
+        return failure();
+      }
       if (response?.usage && onUsage) {
         onUsage(response.usage);
       }
       if (signal?.aborted) throw new Error("Director review aborted");
+      diagnostics.push({ finishReason: response?.finishReason || "", contentLength: String(response?.content || "").length,
+        reasoningLength: String(response?.reasoningContent || "").length, usage: response?.usage || null,
+        contentPreview: clip(response?.content || "", 1200) });
+      if (["length", "max_tokens"].includes(response?.finishReason)) {
+        lastError = new Error("Director 输出被截断，未执行该响应中的工具或决策");
+        if (++parseFailures >= 2) return failure();
+        responseBudget = 8192;
+        messages.push({ role: "user", content: "上一响应被截断，未采纳任何工具或决策。请缩短思考与输出，基于同一证据继续，返回简洁契约 JSON 或所需工具调用。" });
+        continue;
+      }
       if (response?.toolCalls?.length) {
         messages.push({ role: "assistant", content: response.content || "", tool_calls: response.toolCalls,
           ...(response.reasoningContent ? { reasoning_content: response.reasoningContent } : {}) });
@@ -584,15 +613,30 @@ export class AgentSupervisor {
         continue;
       }
       try {
+        let decision = parseDirectorDecision(response?.content, packet);
+        if (packet.pendingFinal && packet.stage === "DISCOVERY" && decision.p2Approved) {
+          p2Decision = decision;
+          packet.stage = "ACCEPTANCE";
+          packet.trigger = "final_candidate";
+          canRead = false;
+          canExecute = typeof executeTool === "function";
+          messages.push({ role: "assistant", content: response.content,
+            ...(response.reasoningContent ? { reasoning_content: response.reasoningContent } : {}) });
+          messages.push({ role: "user", content: "Runtime 已批准 P2，现进入 ACCEPTANCE。继续验收已有 out 产物：至少重跑一次，再根据真实结果返回最终 JSON。无需 Worker 重新调查。" });
+          continue;
+        }
+        if (p2Decision) decision = { ...decision, p2Approved: true, p2Review: p2Decision.p2Review, p2EvidenceRefs: p2Decision.p2EvidenceRefs,
+          nextStage: decision.nextStage === "DISCOVERY" ? "DISCOVERY" : "IMPLEMENTATION" };
         return {
-          decision: parseDirectorDecision(response?.content, packet),
+          decision: { ...decision, diagnostics },
           raw: String(response?.content || ""),
         };
       } catch (error) {
         lastError = error;
         if (++parseFailures >= 2) break;
-        if (turn < 5) {
-          messages.push({ role: "assistant", content: response?.content || "" });
+        if (turn < 8) {
+          messages.push({ role: "assistant", content: response?.content || "",
+            ...(response?.reasoningContent ? { reasoning_content: response.reasoningContent } : {}) });
           messages.push({
             role: "user",
             content: `输出不符合契约：${error.message}。请只返回符合既定字段的 JSON 对象。`,
@@ -600,12 +644,6 @@ export class AgentSupervisor {
         }
       }
     }
-    return { decision: {
-      action: "continue", requestedAction: "continue", finalAccepted: false,
-      reason: "Director 审阅未能在预算内完成有效验收。",
-      guidance: `检查 out 产物并按执行回执修复后重新提交。${lastError?.message || ""}\n${JSON.stringify(packet.directorRuns)}`,
-      requiredEvidence: ["可重新执行且结果符合目标的 out 交付文件"],
-      verificationRuns: packet.directorRuns,
-    }, raw: "" };
+    return failure();
   }
 }

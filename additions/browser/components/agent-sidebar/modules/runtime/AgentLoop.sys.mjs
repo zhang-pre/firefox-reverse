@@ -343,7 +343,7 @@ export async function runAgentTurn(p) {
     );
   if (stageGate) tools.push(STAGE_CHECKPOINT_TOOL);
   const allToolCalls = [];
-  const dispatchBudget = stageGate ? Math.max(1, Math.min(20, stageGate.toolBudget || 20)) : Infinity;
+  const dispatchBudget = stageGate ? Math.max(1, Math.min(90, stageGate.toolBudget || 90)) : Infinity;
   let dispatched = 0;
   let gateReason = "";
   let checkpoint = null;

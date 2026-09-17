@@ -107,7 +107,7 @@ function makeHarness({
       directorCalls.push({ messages: requestMessages, options });
       const next = directorDecisions.shift();
       return {
-        ...(next?.toolCalls ? next : { content: JSON.stringify(next) }),
+        ...(next?.response || (next?.toolCalls ? next : { content: JSON.stringify(next) })),
         usage: { prompt_tokens: 5, completion_tokens: 2 },
       };
     },
@@ -522,7 +522,7 @@ await rejectedFinals.orchestrator.run("final-rejections", { supervised: true, wo
 check("three rejected final candidates stop even if Director omits blocked", rejectedFinals.calls.length === 3 && rejectedFinals.summaryCalls.length === 1);
 
 const progress = makeHarness({
-  turns: Array.from({ length: 6 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false", toolCalls: [{ name: "fs_read", env: { ok: true, data: { content: "new evidence" } } }] } })),
+  turns: Array.from({ length: 6 }, () => ({ result: { ...blockedTurn().result, stopReason: "stage_checkpoint", checkpoint: { phase: "ROUTE_CHANGE" }, content: "candidate_complete: false", toolCalls: [{ name: "fs_read", env: { ok: true, data: { content: "new evidence" } } }] } })),
   directorDecisions: [rejection(), rejection(), { ...rejection(), blocked: false, reason: "已取得可验证进展" }, rejection(), rejection(), rejection()],
 });
 await progress.orchestrator.run("progress", { supervised: true, workspaceRoot: "/work" });
@@ -536,9 +536,9 @@ for (const action of ["stop", "ask_user"]) {
 
 const capped = makeHarness({ turns: Array.from({ length: 12 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false", toolCalls: [{ name: "fs_read", env: { ok: true, data: { content: "new evidence" } } }] } })), directorDecisions: Array.from({ length: 12 }, () => ({ ...rejection(), blocked: false })) });
 await capped.orchestrator.run("review-cap", { supervised: true, workspaceRoot: "/work" });
-check("overall review cap also produces a final Worker report", capped.calls.length === 12 && capped.summaryCalls.length === 1 && capped.statuses.at(-1).status === "failed");
+check("ordinary segment safety cap produces a report without Director calls", capped.calls.length === 12 && capped.directorCalls.length === 0 && capped.summaryCalls.length === 1 && capped.statuses.at(-1).status === "failed");
 
-const failedTools = makeHarness({ turns: Array.from({ length: 4 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false" } })), directorDecisions: Array.from({ length: 4 }, () => ({ ...rejection(), blocked: false })) });
+const failedTools = makeHarness({ turns: Array.from({ length: 4 }, () => ({ result: { ...blockedTurn().result, stopReason: "stage_checkpoint", checkpoint: { phase: "ROUTE_CHANGE" }, content: "candidate_complete: false" } })), directorDecisions: Array.from({ length: 4 }, () => ({ ...rejection(), blocked: false })) });
 await failedTools.orchestrator.run("failed-tools", { supervised: true, workspaceRoot: "/work" });
 check("failed subprocess envelopes cannot reset the retry budget", failedTools.calls.length === 3 && failedTools.summaryCalls.length === 1);
 
@@ -550,11 +550,27 @@ await p2Rejected.orchestrator.run("p2-rejected", { supervised: true, workspaceRo
 check("summary-only P2 approval never transitions and stops after three rejections", p2Rejected.calls.length === 3 && p2Rejected.calls.every(c => c.stageGate.stage === "DISCOVERY") && p2Rejected.summaryCalls.length === 1);
 
 const budgetOnly = makeHarness({
-  turns: Array.from({ length: 4 }, () => ({ result: { content: "budget exhausted", stopReason: "segment_budget", toolCalls: [] } })),
-  directorDecisions: [rejection(), { action: "continue", reason: "继续采样" }, rejection(), rejection()],
+  turns: [blockedTurn(), { result: { content: "budget exhausted", stopReason: "segment_budget", messages: [{ role: "tool", content: "preserved evidence" }], toolCalls: [{ name: "page_eval", env: { ok: true } }] } }, blockedTurn(), blockedTurn()],
+  directorDecisions: [rejection(), rejection(), rejection()],
 });
 await budgetOnly.orchestrator.run("budget-only", { supervised: true, workspaceRoot: "/work" });
-check("budget-only handoff neither increments nor resets blocked retry streak", budgetOnly.calls.length === 4 && budgetOnly.summaryCalls.length === 1);
+check("budget-only resumes Worker without Director or resetting blocked streak", budgetOnly.calls.length === 4 && budgetOnly.directorCalls.length === 3 && budgetOnly.summaryCalls.length === 1 && budgetOnly.calls[2].messages.some(m => m.content === "preserved evidence") && budgetOnly.calls.every(c => c.stageGate.toolBudget === 90));
+
+const protocolFailure = makeHarness({ turns: [blockedTurn()], directorDecisions: [{ response: { content: "not JSON", finishReason: "stop" } }, { response: { content: "still not JSON", finishReason: "stop" } }] });
+await protocolFailure.orchestrator.run("review-error", { supervised: true, workspaceRoot: "/work" });
+check("review error stops without Worker repair or paid summary", protocolFailure.calls.length === 1 && protocolFailure.directorCalls.length === 2 && protocolFailure.summaryCalls.length === 0 && protocolFailure.statuses.at(-1).status === "failed" && protocolFailure.core.getState("review-error").steps.some(s => s.action === "review_error" && s.diagnostics.length === 2));
+
+const lateP2 = makeHarness({
+  turns: [{ result: { content: "candidate_complete: true", stopReason: "stage_checkpoint", checkpoint: { phase: "P6", evidenceRefs: ["tool:1:1"] }, toolCalls: [{ name: "page_eval", evidenceId: "tool:1:1", env: { ok: true, data: { output: "browser oracle" } } }] } }],
+  directorDecisions: [
+    { toolCalls: [{ id: "read", function: { name: "evidence_read", arguments: JSON.stringify({ evidenceId: "tool:1:1" }) } }] },
+    { action: "continue", reason: "入口已证实", nextStage: "IMPLEMENTATION", p2Review: { entry: "sign", inputs: "ts", outputScope: "wire", stateAndEncoding: "已对齐", limitations: "尚待独立重跑", evidenceRefs: ["tool:1:1"] } },
+    { toolCalls: [{ id: "run", function: { name: "run_node", arguments: JSON.stringify({ file: "out/solver.js" }) } }] },
+    { action: "finish", reason: "实际结果符合目标", finalAcceptance: { independentArtifactVerified: true, liveRequestVerified: true, evidenceRefs: ["director:1:1"] } },
+  ],
+});
+await lateP2.orchestrator.run("late-p2", { supervised: true, workspaceRoot: "/work" });
+check("late P2 and final verification finish in one review without Worker replay", lateP2.calls.length === 1 && lateP2.directorCalls.length === 4 && lateP2.summaryCalls.length === 0 && lateP2.statuses.at(-1).status === "completed" && lateP2.core.getState("late-p2").steps.some(s => s.finalAccepted && s.p2Approved && s.runtimeStage === "ACCEPTANCE"));
 
 const failed = makeHarness({
   backendError: new Error("backend unavailable"),

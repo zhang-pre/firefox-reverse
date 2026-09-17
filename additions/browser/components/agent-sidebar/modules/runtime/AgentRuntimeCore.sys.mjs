@@ -347,6 +347,7 @@ export class AgentRuntimeCore {
           p2Review: decision.p2Review || null,
           p2EvidenceRefs: decision.p2EvidenceRefs || [],
           evidenceReads: decision.evidenceReads || [],
+          diagnostics: decision.diagnostics || [],
         };
       }
     }

@@ -216,6 +216,7 @@ function harness({ chat, dispatch, confirm = false, append, directorChat } = {})
   const reviews = [];
   const decision = { action: "ask_user", reason: "need input", instruction: "report", finalAccepted: false };
   const h = harness({
+    chat: async () => reply("candidate_complete: true"),
     directorChat: async messages => {
       reviews.push(structuredClone(messages));
       return reviews.length === 1 ? gate.promise : reply(JSON.stringify(decision));
