@@ -17,3 +17,12 @@ FRX_DATA_DIR = "/home/zbb/projects/frx-director-mcp/data"
 
 [mcp_servers.frx-director.tools.frx_status]
 approval_mode = "approve"
+
+[mcp_servers.frx-director.tools.agent_start]
+approval_mode = "approve"
+
+[mcp_servers.frx-director.tools.agent_poll]
+approval_mode = "approve"
+
+[mcp_servers.frx-director.tools.agent_send]
+approval_mode = "approve"

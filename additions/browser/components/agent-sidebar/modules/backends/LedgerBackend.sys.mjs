@@ -79,34 +79,97 @@ export class LedgerBackend {
     this._workspace = workspace || null;
     this._conn = null;
     this._opening = null;
+    this._closing = null;
+    this._shutdownClient = null;
+    this._shutdownBlocker = null;
+  }
+
+  _unregisterShutdown() {
+    if (this._shutdownBlocker) {
+      this._shutdownClient.removeBlocker(this._shutdownBlocker);
+      this._shutdownBlocker = null;
+      this._shutdownClient = null;
+    }
+  }
+
+  /** Firefox 退出时先等懒开库完成，再关闭连接；重复调用只执行一次。 */
+  close() {
+    if (this._closing) {
+      return this._closing;
+    }
+    this._closing = (async () => {
+      try {
+        if (this._opening) {
+          try {
+            await this._opening;
+          } catch {
+            // 打开失败时 _db() 已负责关闭可能创建的连接。
+          }
+        }
+        const conn = this._conn;
+        this._conn = null;
+        if (conn) {
+          await conn.close();
+        }
+      } finally {
+        this._unregisterShutdown();
+      }
+    })();
+    return this._closing;
   }
 
   /** 懒开全局 SQLite 连接（单例，跨会话/多窗口共享同一记忆库；写经同一连接串行、并发安全）。 */
   async _db() {
-    if (this._conn) {
-      return this._conn;
+    if (this._closing) {
+      throw new Error("LedgerBackend is shutting down");
     }
     if (this._opening) {
       return this._opening;
     }
-    this._opening = (async () => {
+    if (this._conn) {
+      return this._conn;
+    }
+    const opening = (async () => {
       const { Sqlite } = ChromeUtils.importESModule("resource://gre/modules/Sqlite.sys.mjs");
-      const dir = PathUtils.join(PathUtils.profileDir, DIR);
-      await IOUtils.makeDirectory(dir, { ignoreExisting: true, createAncestors: true });
-      const path = PathUtils.join(dir, DB);
-      const conn = await Sqlite.openConnection({ path });
-      await conn.execute(
-        "CREATE TABLE IF NOT EXISTS mem(" +
-          "id INTEGER PRIMARY KEY AUTOINCREMENT, site TEXT, workspace TEXT, kind TEXT, text TEXT, ev TEXT, ts TEXT, norm TEXT)"
-      );
-      await conn.execute("CREATE INDEX IF NOT EXISTS i_site ON mem(site)");
-      await conn.execute("CREATE INDEX IF NOT EXISTS i_ws ON mem(workspace)");
-      await conn.execute("CREATE INDEX IF NOT EXISTS i_norm ON mem(norm)");
-      this._conn = conn;
-      this._opening = null;
-      return conn;
+      const blocker = () => this.close();
+      Sqlite.shutdown.addBlocker("Agent sidebar: close memory.sqlite", blocker);
+      this._shutdownClient = Sqlite.shutdown;
+      this._shutdownBlocker = blocker;
+      let conn = null;
+      try {
+        const dir = PathUtils.join(PathUtils.profileDir, DIR);
+        await IOUtils.makeDirectory(dir, { ignoreExisting: true, createAncestors: true });
+        const path = PathUtils.join(dir, DB);
+        conn = await Sqlite.openConnection({ path });
+        await conn.execute(
+          "CREATE TABLE IF NOT EXISTS mem(" +
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, site TEXT, workspace TEXT, kind TEXT, text TEXT, ev TEXT, ts TEXT, norm TEXT)"
+        );
+        await conn.execute("CREATE INDEX IF NOT EXISTS i_site ON mem(site)");
+        await conn.execute("CREATE INDEX IF NOT EXISTS i_ws ON mem(workspace)");
+        await conn.execute("CREATE INDEX IF NOT EXISTS i_norm ON mem(norm)");
+        if (this._closing) {
+          throw new Error("LedgerBackend is shutting down");
+        }
+        this._conn = conn;
+        return conn;
+      } catch (error) {
+        try {
+          if (conn) {
+            await conn.close();
+          }
+        } finally {
+          this._unregisterShutdown();
+        }
+        throw error;
+      }
     })();
-    return this._opening;
+    this._opening = opening;
+    try {
+      return await opening;
+    } finally {
+      this._opening = null;
+    }
   }
 
   _wsRoot(ctx) {
