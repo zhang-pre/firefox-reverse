@@ -46,7 +46,6 @@ EXTRA_JS_MODULES.agentsidebar.runtime += [
     "modules/runtime/AgentRuntime.sys.mjs",
     "modules/runtime/AgentRuntimeCore.sys.mjs",
     "modules/runtime/AgentRuntimePorts.sys.mjs",
-    "modules/runtime/AgentSupervisor.sys.mjs",
     "modules/runtime/AgentTurnOrchestrator.sys.mjs",
 ]
 

@@ -54,29 +54,6 @@ check("reasoning is tracked separately", current.steps[1].kind === "think");
 check("tool result and media are reduced", current.steps[2].status === "ok" && current.steps[2].images.length === 1);
 check("subscribers receive snapshots", snapshots.length >= 2);
 
-core.applyEvent(state, {
-  type: "director_review",
-  reviewIndex: 1,
-  trigger: "stage_gate",
-});
-core.applyEvent(state, {
-  type: "director_decision",
-  reviewIndex: 1,
-  trigger: "stage_gate",
-  decision: {
-    action: "redirect",
-    reason: "missing live evidence",
-    guidance: "run the standalone script",
-    requiredEvidence: ["HTTP 2xx"],
-  },
-});
-check(
-  "Director review and strict decision are reduced into one visible step",
-  state.steps[3].kind === "director" &&
-    state.steps[3].status === "decided" &&
-    state.steps[3].action === "redirect"
-);
-
 let confirmation = null;
 state.pendingConfirm = {
   id: "confirm-1",

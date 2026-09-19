@@ -14,8 +14,6 @@ import { normalizeReasoningEffort } from "../llm/ReasoningEffort.sys.mjs";
 const PREF_PREFIX = "extensions.firefox-reverse.agent.";
 const MODEL_PROFILES_KEY = PREF_PREFIX + "modelProfiles.v1";
 const ACTIVE_MODEL_PROFILE_KEY = PREF_PREFIX + "activeModelProfileId";
-const WORKER_MODEL_PROFILE_KEY = PREF_PREFIX + "supervision.workerModelProfileId";
-const DIRECTOR_MODEL_PROFILE_KEY = PREF_PREFIX + "supervision.directorModelProfileId";
 const MAX_MODEL_PROFILES = 50;
 const LEGACY_PROVIDER_IDS = ["deepseek", "zhipu", "kimi", "minimax", "qwen", "custom"];
 
@@ -193,42 +191,6 @@ export class ConfigStore {
     return profile ? { ...profile } : null;
   }
 
-  _getRoleModelProfileId(key) {
-    const { profiles, activeId } = this._ensureProfiles();
-    const stored = this.b.getString(key, "");
-    if (profiles.some(profile => profile.id === stored)) {
-      return stored;
-    }
-    this.b.setString(key, activeId);
-    return activeId;
-  }
-
-  _setRoleModelProfileId(key, id) {
-    const profile = this.getModelProfile(id);
-    if (!profile) {
-      throw new Error("模型配置不存在: " + id);
-    }
-    this.b.setString(key, profile.id);
-    return { ...profile };
-  }
-
-  /** 双模型领航角色。两者都引用普通 API 模型配置，不复制 Key。 */
-  getWorkerModelProfileId() {
-    return this._getRoleModelProfileId(WORKER_MODEL_PROFILE_KEY);
-  }
-
-  setWorkerModelProfileId(id) {
-    return this._setRoleModelProfileId(WORKER_MODEL_PROFILE_KEY, id);
-  }
-
-  getDirectorModelProfileId() {
-    return this._getRoleModelProfileId(DIRECTOR_MODEL_PROFILE_KEY);
-  }
-
-  setDirectorModelProfileId(id) {
-    return this._setRoleModelProfileId(DIRECTOR_MODEL_PROFILE_KEY, id);
-  }
-
   setActiveModelProfileId(id) {
     const { profiles } = this._ensureProfiles();
     const p = profiles.find(x => x.id === id);
@@ -302,12 +264,6 @@ export class ConfigStore {
       return false;
     }
     this._writeProfiles(next);
-    if (this.b.getString(WORKER_MODEL_PROFILE_KEY, "") === id) {
-      this.b.setString(WORKER_MODEL_PROFILE_KEY, next[0].id);
-    }
-    if (this.b.getString(DIRECTOR_MODEL_PROFILE_KEY, "") === id) {
-      this.b.setString(DIRECTOR_MODEL_PROFILE_KEY, next[0].id);
-    }
     if (activeId === id) {
       this.b.setString(ACTIVE_MODEL_PROFILE_KEY, next[0].id);
       this._syncLegacy(next[0]);

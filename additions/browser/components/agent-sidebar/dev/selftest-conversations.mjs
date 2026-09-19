@@ -76,14 +76,31 @@ ok((await s.consumeCancellationBoundary(t1.id)) === true, "下一轮消费取消
 ok((await s.consumeCancellationBoundary(t1.id)) === false, "取消边界只消费一次");
 
 await s.setThreadMode(t1.id, "supervised");
-ok((await s.getThread(t1.id)).mode === "supervised", "双模型领航模式按会话持久化");
+ok((await s.getThread(t1.id)).mode === null, "已移除的双模型模式不再持久化");
+await s.setThreadMode(t1.id, "assist");
 
 const bundle = await s.exportThread(t1.id);
 ok(bundle.format === "firefox-reverse-conversation" && bundle.schemaVersion === 1, "导出包格式带版本");
 ok(!("workspace" in bundle.conversation) && !("envId" in bundle.conversation), "导出不携带本机目录和环境绑定");
 const imported = await s.importThread(JSON.stringify(bundle));
 ok(imported.id !== t1.id && imported.messages.length === 2, "导入生成新 id 并保留消息");
-ok(imported.mode === "supervised", "导入保留双模型领航模式");
+ok(imported.mode === "assist", "导入保留辅助模式");
+const retiredBundle = structuredClone(bundle);
+retiredBundle.conversation.mode = "supervised";
+const retiredImport = await s.importThread(JSON.stringify(retiredBundle));
+ok(retiredImport.mode === null && retiredImport.messages.length === 2, "旧双模型导入保留消息但不再启用旧模式");
+const savedIOUtils = globalThis.IOUtils;
+globalThis.IOUtils = {
+  readJSON: async () => ({ threads: [{ ...t1, mode: "supervised" }] }),
+};
+try {
+  const reopened = new ConversationStore({ memoryOnly: false, path: "legacy-conversations.json" });
+  const oldThread = await reopened.getThread(t1.id);
+  ok(oldThread.mode === null && oldThread.messages.length === 2, "旧双模型本机会话保留消息并重置模式");
+} finally {
+  if (savedIOUtils === undefined) delete globalThis.IOUtils;
+  else globalThis.IOUtils = savedIOUtils;
+}
 ok(imported.workspace === null && imported.envId === null && imported.lastTurnStatus === "idle", "导入会话保持静止且不绑定本机资源");
 ok(imported.contextProjection === null && imported.usage.requests === 0, "导入不携带运行期投影和 Usage");
 let badImport = false;
@@ -101,7 +118,7 @@ await s.renameThread(t1.id, "RC4 入口分析");
 ok((await s.getThread(t1.id)).title === "RC4 入口分析", "renameThread 生效");
 
 await s.deleteThread(t2.id);
-ok((await s.listThreads()).length === 3, "deleteThread 仅删除目标线程，导入和长会话仍保留");
+ok((await s.listThreads()).length === 4, "deleteThread 仅删除目标线程，导入和长会话仍保留");
 
 console.log(`\nConversationStore 自测：${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

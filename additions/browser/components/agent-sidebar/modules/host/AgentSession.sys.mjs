@@ -14,8 +14,8 @@ import { buildClientFromStore, isVisionModel } from "../providers/providers.sys.
 const ports = createFirefoxAgentRuntimePorts({
   config: configStore,
   conversations: conversationStore,
-  createClient: ({ transport, profileId }) =>
-    buildClientFromStore(configStore, { transport, profileId }),
+  createClient: ({ transport }) =>
+    buildClientFromStore(configStore, { transport }),
   isVisionModel,
 });
 

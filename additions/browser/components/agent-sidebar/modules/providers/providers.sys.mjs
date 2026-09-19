@@ -240,17 +240,8 @@ export function listProviders() {
  */
 export function buildClientFromStore(store, overrides = {}) {
   // vNext：优先使用当前命名模型配置；旧 ConfigStore getter 仍作为兼容兜底。
-  let profile = null;
-  if (!overrides.provider) {
-    if (overrides.profileId) {
-      profile = store.getModelProfile?.(overrides.profileId) || null;
-      if (!profile) {
-        throw new Error(`模型配置不存在: ${overrides.profileId}`);
-      }
-    } else {
-      profile = store.getActiveModelProfile?.() || null;
-    }
-  }
+  const profile =
+    !overrides.provider && store.getActiveModelProfile ? store.getActiveModelProfile() : null;
   const id = overrides.provider || (profile && profile.provider) || store.getActiveProvider();
   const p = BUILTIN_PROVIDERS[id];
   if (!p) {

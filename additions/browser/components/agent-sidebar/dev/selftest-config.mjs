@@ -78,18 +78,12 @@ check("同渠道可保存多账号", cs.listModelProfiles().length, 2);
 check("新建配置自动选中", cs.getActiveModelProfileId(), accountB.id);
 check("当前配置读取账号 B Key", cs.getApiKey("custom"), "sk-account-b");
 check("可按 id 读取非当前模型配置", cs.getModelProfile(accountA.id)?.apiKey, "sk-account-a");
-cs.setWorkerModelProfileId(accountB.id);
-cs.setDirectorModelProfileId(accountA.id);
-check("Worker 模型角色按 profile id 持久化", cs.getWorkerModelProfileId(), accountB.id);
-check("Director 模型角色按 profile id 持久化", cs.getDirectorModelProfileId(), accountA.id);
 cs.setActiveModelProfileId(accountA.id);
 check("历史配置切回账号 A", cs.getApiKey("custom"), "sk-account-a");
 const copy = cs.duplicateModelProfile(accountA.id);
 check("复制配置生成独立 id", copy.id === accountA.id, false);
-cs.setDirectorModelProfileId(copy.id);
 cs.deleteModelProfile(copy.id);
 check("删除复制项不影响原配置", cs.listModelProfiles().length, 2);
-check("删除角色配置后 Director 安全回退", cs.getDirectorModelProfileId(), accountA.id);
 
 const oldPrefs = new Map([
   ["extensions.firefox-reverse.agent.activeProvider", "deepseek"],

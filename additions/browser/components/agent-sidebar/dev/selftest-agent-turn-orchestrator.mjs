@@ -1,11 +1,6 @@
 import { AgentRuntimeCore } from "../modules/runtime/AgentRuntimeCore.sys.mjs";
 import { defineAgentRuntimePorts } from "../modules/runtime/AgentRuntimePorts.sys.mjs";
 import { AgentTurnOrchestrator } from "../modules/runtime/AgentTurnOrchestrator.sys.mjs";
-import {
-  buildEvidencePacket,
-  inferDirectorTrigger,
-  parseDirectorDecision,
-} from "../modules/runtime/AgentSupervisor.sys.mjs";
 import { emptyUsage } from "../modules/llm/Usage.sys.mjs";
 
 let pass = 0;
@@ -24,8 +19,6 @@ function makeHarness({
   turns = [],
   boundary = false,
   backendError = null,
-  directorDecisions = [],
-  summaryError = false,
 } = {}) {
   let clock = 1000;
   const calls = [];
@@ -33,18 +26,13 @@ function makeHarness({
   const statuses = [];
   const usage = [];
   const writes = [];
-  const directorCalls = [];
   const clientCreations = [];
-  const order = [];
-  const summaryCalls = [];
   const router = {
     name: "test-router",
     listSpecs: () => [],
     needsConfirm: () => false,
-    async dispatch(name, args, ctx) {
-      order.push("director-tool");
-      if (name !== "run_node" || args.file !== "out/solver.js" || ctx.workspaceRoot !== "/work") throw new Error("wrong verification context");
-      return { ok: true, data: { ok: true, exitCode: 0, output: 'HTTP 200 {"data":[1,2]}' } };
+    async dispatch() {
+      throw new Error("unexpected tool dispatch");
     },
   };
   const core = new AgentRuntimeCore({
@@ -91,25 +79,8 @@ function makeHarness({
     providerId: "mock",
     protocol: "openai",
     model: "vision-model",
-    async chat(messages, options) {
-      order.push("worker-summary");
-      summaryCalls.push({ messages, options });
-      if (summaryError) throw new Error("summary unavailable");
-      return { content: "已验证：入口已定位。未完成：接口实打仍失败。证据：HTTP 403。产物 out/solver.js 尚未验收。是否风控未知；需确认网络访问条件后恢复。", usage: { prompt_tokens: 4, completion_tokens: 3 } };
-    },
-  };
-  const directorClient = {
-    providerId: "director-mock",
-    protocol: "openai",
-    model: "director-model",
-    async chat(requestMessages, options) {
-      order.push("director");
-      directorCalls.push({ messages: requestMessages, options });
-      const next = directorDecisions.shift();
-      return {
-        ...(next?.toolCalls ? next : { content: JSON.stringify(next) }),
-        usage: { prompt_tokens: 5, completion_tokens: 2 },
-      };
+    async chat() {
+      throw new Error("unexpected projection request");
     },
   };
   const ports = defineAgentRuntimePorts({
@@ -127,9 +98,6 @@ function makeHarness({
       }),
       getActiveProvider: () => "mock",
       getModel: () => "vision-model",
-      getModelProfile: id => ({ id, provider: "mock", model: id }),
-      getWorkerModelProfileId: () => "worker-profile",
-      getDirectorModelProfileId: () => "director-profile",
     },
     conversations: conversationStore,
     llm: {
@@ -143,7 +111,7 @@ function makeHarness({
       },
       createClient: input => {
         clientCreations.push(input);
-        return input.role === "director" ? directorClient : client;
+        return client;
       },
       isVisionModel: model => model === "vision-model",
     },
@@ -166,7 +134,6 @@ function makeHarness({
     runtimeCore: core,
     ports,
     runAgentTurn: async options => {
-      order.push("worker");
       calls.push(options);
       const turn = turns.shift() || { result: { content: "", stopReason: "final" } };
       if (turn.delta) {
@@ -190,10 +157,7 @@ function makeHarness({
     usage,
     writes,
     router,
-    directorCalls,
     clientCreations,
-    order,
-    summaryCalls,
   };
 }
 
@@ -262,6 +226,12 @@ check(
       "frx-v1:thread-complete:profile_main:vision-model"
 );
 check(
+  "one active model client is created for the turn",
+  completed.clientCreations.length === 1 &&
+    !("profileId" in completed.clientCreations[0]) &&
+    !("role" in completed.clientCreations[0])
+);
+check(
   "provider usage is normalized and persisted once",
   completed.usage.length === 1 &&
     completed.usage[0].requests === 1 &&
@@ -326,215 +296,6 @@ check(
   continuedState.steps.length === 1 &&
     continuedState.steps[0].text === "final stream"
 );
-
-const incompletePacket = buildEvidencePacket({
-  objective: "produce a verified client",
-  result: {
-    content: "candidate_complete: true",
-    stopReason: "final",
-    toolCalls: [],
-  },
-});
-check(
-  "explicit incomplete evidence cannot be mistaken for a final candidate",
-  inferDirectorTrigger({
-    content: "phase: P2\ncandidate_complete: false\nP2 已完成",
-    stopReason: "final",
-  }) === "stage_gate"
-);
-const failedArtifactPacket = buildEvidencePacket({
-  result: {
-    content: "candidate_complete: false",
-    toolCalls: [
-      {
-        id: "failed-file",
-        name: "fs_write",
-        args: { path: "out/not-created.js" },
-        env: { ok: false, error: "write failed" },
-      },
-    ],
-  },
-});
-check(
-  "failed tool calls cannot create artifact evidence",
-  failedArtifactPacket.artifacts.length === 0
-);
-const rejectedFinish = parseDirectorDecision(
-  JSON.stringify({
-    action: "finish",
-    reason: "worker says it is done",
-    guidance: "run the missing verification",
-    nextPhase: "P6",
-    requiredEvidence: ["standalone artifact", "live response"],
-    finalAcceptance: {
-      independentArtifactVerified: true,
-      liveRequestVerified: true,
-      evidenceRefs: ["made-up"],
-    },
-  }),
-  incompletePacket
-);
-check(
-  "finish is rejected when artifact/live evidence cannot be resolved",
-  rejectedFinish.action === "continue" && !rejectedFinish.finalAccepted
-);
-
-const supervised = makeHarness({
-  turns: [
-    {
-      delta: "worker phase one",
-      result: {
-        content:
-          "[WORKER_EVIDENCE]\nphase: P4\ncandidate_complete: false\n[/WORKER_EVIDENCE]",
-        stopReason: "final",
-        messages: [
-          { role: "user", content: "build a verified client" },
-          { role: "assistant", content: "phase P4" },
-        ],
-        toolCalls: [
-          {
-            id: "file-1",
-            name: "fs_write",
-            args: { path: "out/solver.js" },
-            env: { ok: true, data: { path: "out/solver.js" } },
-          },
-        ],
-      },
-    },
-    {
-      delta: "worker final",
-      result: {
-        content:
-          "[WORKER_EVIDENCE]\nphase: P6\ncandidate_complete: true\n[/WORKER_EVIDENCE]",
-        stopReason: "final",
-        messages: [{ role: "assistant", content: "phase P6" }],
-        toolCalls: [
-          {
-            id: "live-1",
-            name: "run_node",
-            args: {
-              file: "out/solver.js",
-              url: "https://api.example.test/data",
-            },
-            env: {
-              ok: true,
-              data: { statusCode: 200, response: { records: 2 } },
-            },
-          },
-        ],
-      },
-    },
-  ],
-  directorDecisions: [
-    {
-      action: "redirect",
-      reason: "缺少真实接口成功响应",
-      guidance: "运行独立脚本并保留 HTTP 状态与响应摘要",
-      nextPhase: "P6",
-      requiredEvidence: ["live request"],
-      finalAcceptance: {
-        independentArtifactVerified: false,
-        liveRequestVerified: false,
-        evidenceRefs: ["tool:file-1"],
-      },
-    },
-    { toolCalls: [{ id: "verify-1", type: "function", function: { name: "run_node", arguments: JSON.stringify({ file: "out/solver.js", args: [] }) } }] },
-    {
-      action: "finish",
-      reason: "独立产物和真实接口响应均已由工具证明",
-      guidance: "",
-      nextPhase: "",
-      requiredEvidence: [],
-      finalAcceptance: {
-        independentArtifactVerified: true,
-        liveRequestVerified: true,
-        evidenceRefs: ["director:2:1"],
-      },
-    },
-  ],
-});
-await supervised.orchestrator.run("thread-supervised", {
-  convo: [{ role: "user", content: "build a verified client" }],
-  supervised: true,
-  workspaceRoot: "/work",
-});
-const supervisedState = supervised.core.getState("thread-supervised");
-check(
-  "supervised mode is strictly sequential",
-  supervised.order.join(",") === "worker,director,worker,director,director-tool,director"
-);
-check(
-  "Director only receives execution tools at final acceptance",
-  supervised.directorCalls.length === 3 &&
-    supervised.directorCalls[0].options.tools == null &&
-    supervised.directorCalls[1].options.tools.map(t => t.function.name).join(",") === "run_node,run_python"
-);
-check(
-  "worker and Director use their selected model profiles",
-  supervised.clientCreations.map(call => `${call.role}:${call.profileId}`).join(",") ===
-    "worker:worker-profile,director:director-profile"
-);
-check(
-  "Director redirect is injected into the next Worker stage",
-  supervised.calls.length === 2 &&
-    supervised.calls.every(call => call.assist === true) &&
-    supervised.calls[1].messages.at(-1).content.includes("Director 决策：redirect")
-);
-check(
-  "final acceptance keeps a visible Director decision and evidence-backed result",
-  supervisedState.settled &&
-    supervisedState.content.includes("Director 最终验收") &&
-    supervisedState.steps.some(
-      step => step.kind === "director" && step.action === "finish"
-    )
-);
-check(
-  "supervised segments and Director usage are persisted",
-  supervised.messages.length === 2 &&
-    supervised.usage.length === 1 &&
-    supervised.usage[0].requests === 3
-);
-
-const blockedTurn = () => ({ result: {
-  content: "candidate_complete: false\nblocked: true\n接口 HTTP 403；原因未知",
-  stopReason: "final",
-  toolCalls: [{ id: "request", name: "run_node", args: { file: "out/solver.js" }, env: { ok: true, data: { ok: false, exitCode: 1, output: "HTTP 403" } } }],
-} });
-const rejection = () => ({ action: "continue", blocked: true, blocker: "HTTP 403", reason: "修复仍未成功", guidance: "检查访问条件", requiredEvidence: ["成功响应"] });
-const stuck = makeHarness({ turns: Array.from({ length: 5 }, blockedTurn), directorDecisions: Array.from({ length: 5 }, rejection) });
-await stuck.orchestrator.run("stuck", { supervised: true, workspaceRoot: "/work", convo: [{ role: "user", content: "完成客户端" }] });
-check("three blocked reviews stop execution and request one Worker report", stuck.calls.length === 3 && stuck.directorCalls.length === 3 && stuck.summaryCalls.length === 1);
-check("report is tool-free and is never sent for another Director review", stuck.summaryCalls[0].options.tools == null && stuck.order.at(-1) === "worker-summary");
-check("stopped task remains incomplete and records the stop decision", stuck.statuses.at(-1).status === "failed" && stuck.core.getState("stuck").content.includes("任务未完成") && stuck.core.getState("stuck").steps.some(s => s.action === "stop" && !s.finalAccepted));
-check("Director receives retry count and previous reasons", JSON.parse(stuck.directorCalls[2].messages[1].content.split("\n").slice(1).join("\n")).retryBudget.consecutiveFailures === 2);
-
-const rejectedFinals = makeHarness({
-  turns: Array.from({ length: 4 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: true" } })),
-  directorDecisions: Array.from({ length: 4 }, () => ({ ...rejection(), blocked: false })),
-});
-await rejectedFinals.orchestrator.run("final-rejections", { supervised: true, workspaceRoot: "/work" });
-check("three rejected final candidates stop even if Director omits blocked", rejectedFinals.calls.length === 3 && rejectedFinals.summaryCalls.length === 1);
-
-const progress = makeHarness({
-  turns: Array.from({ length: 6 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false", toolCalls: [{ name: "fs_read", env: { ok: true, data: { content: "new evidence" } } }] } })),
-  directorDecisions: [rejection(), rejection(), { ...rejection(), blocked: false, reason: "已取得可验证进展" }, rejection(), rejection(), rejection()],
-});
-await progress.orchestrator.run("progress", { supervised: true, workspaceRoot: "/work" });
-check("a productive intermediate stage resets consecutive blocker count", progress.calls.length === 6 && progress.summaryCalls.length === 1);
-
-for (const action of ["stop", "ask_user"]) {
-  const early = makeHarness({ turns: [blockedTurn()], directorDecisions: [{ ...rejection(), action }], summaryError: true });
-  await early.orchestrator.run(`early-${action}`, { supervised: true, workspaceRoot: "/work" });
-  check(`${action} stops immediately and preserves evidence when report generation fails`, early.calls.length === 1 && early.summaryCalls.length === 1 && early.core.getState(`early-${action}`).content.includes("HTTP 403") && early.statuses.at(-1).status === "failed");
-}
-
-const capped = makeHarness({ turns: Array.from({ length: 12 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false", toolCalls: [{ name: "fs_read", env: { ok: true, data: { content: "new evidence" } } }] } })), directorDecisions: Array.from({ length: 12 }, () => ({ ...rejection(), blocked: false })) });
-await capped.orchestrator.run("review-cap", { supervised: true, workspaceRoot: "/work" });
-check("overall review cap also produces a final Worker report", capped.calls.length === 12 && capped.summaryCalls.length === 1 && capped.statuses.at(-1).status === "failed");
-
-const failedTools = makeHarness({ turns: Array.from({ length: 4 }, () => ({ result: { ...blockedTurn().result, content: "candidate_complete: false" } })), directorDecisions: Array.from({ length: 4 }, () => ({ ...rejection(), blocked: false })) });
-await failedTools.orchestrator.run("failed-tools", { supervised: true, workspaceRoot: "/work" });
-check("failed subprocess envelopes cannot reset the retry budget", failedTools.calls.length === 3 && failedTools.summaryCalls.length === 1);
 
 const failed = makeHarness({
   backendError: new Error("backend unavailable"),

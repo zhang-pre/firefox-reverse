@@ -17,15 +17,13 @@ async function until(predicate) {
   }
   throw new Error("test condition timed out");
 }
-function harness({ chat, dispatch, confirm = false, append, directorChat } = {}) {
+function harness({ chat, dispatch, confirm = false, append } = {}) {
   const history = [], requests = [], dispatches = [];
   const config = {
     getContextStrategy: () => "legacy",
     getActiveModelProfile: () => null,
     getActiveProvider: () => "test",
     getModel: () => "test",
-    getWorkerModelProfileId: () => "worker",
-    getDirectorModelProfileId: () => "director",
   };
   const client = {
     model: "test", providerId: "test", protocol: "openai",
@@ -59,7 +57,7 @@ function harness({ chat, dispatch, confirm = false, append, directorChat } = {})
     },
     llm: {
       transport: { fetch: async () => { throw Error("no network"); }, createAbortController: () => new AbortController(), setTimeout, clearTimeout },
-      createClient: ({ role }) => role === "director" ? { ...client, chat: directorChat } : client,
+      createClient: () => client,
       isVisionModel: () => false,
     },
     tools: {
@@ -210,27 +208,6 @@ function harness({ chat, dispatch, confirm = false, append, directorChat } = {})
   h.runtime.dispose();
 }
 
-// A pending steer invalidates the old Director decision; its next review sees it.
-{
-  const gate = deferred();
-  const reviews = [];
-  const decision = { action: "ask_user", reason: "need input", instruction: "report", finalAccepted: false };
-  const h = harness({
-    directorChat: async messages => {
-      reviews.push(structuredClone(messages));
-      return reviews.length === 1 ? gate.promise : reply(JSON.stringify(decision));
-    },
-  });
-  const run = h.run({ supervised: true, convo: [{ role: "user", content: "original".repeat(1000) }] });
-  await until(() => reviews.length === 1);
-  h.runtime.steer("t", "updated objective");
-  gate.resolve(reply(JSON.stringify(decision)));
-  await run;
-  assert.equal(reviews.length, 2);
-  assert.match(JSON.stringify(reviews[1]), /updated objective/);
-  assert.equal(h.runtime.getRunLog().length, 1);
-  h.runtime.dispose();
-}
 // Exact corrections survive compression even if the model's summary omits them.
 {
   let round = 0, summaries = 0, injected = false;

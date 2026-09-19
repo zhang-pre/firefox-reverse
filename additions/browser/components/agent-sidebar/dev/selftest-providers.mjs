@@ -82,30 +82,21 @@ check("命名配置 B 读取独立模型", profileClient.model, "model-b");
 cs.setActiveModelProfileId(accountA.id);
 profileClient = buildClientFromStore(cs);
 check("切回命名配置 A", [profileClient.apiKey, profileClient.model], ["key-a", "model-a"]);
-profileClient = buildClientFromStore(cs, { profileId: accountB.id });
-check(
-  "按角色 profileId 构造非当前客户端",
-  [profileClient.apiKey, profileClient.model],
-  ["key-b", "model-b"]
-);
-
-// 显式角色 profile 是隔离边界：空 Key 不能从同 provider 的 active profile 偷取，
-// 否则会出现“Director 模型 + Worker Key”的混合客户端。
-const isolatedDirector = cs.createModelProfile({
-  name: "Director 空 Key",
+// 当前命名配置的空 Key 不应从同 provider 的旧配置回退。
+cs.createModelProfile({
+  name: "空 Key",
   provider: "custom",
   apiKey: "",
-  baseUrl: "https://director.example.com/v1",
+  baseUrl: "https://empty.example.com/v1",
   protocol: "openai",
-  model: "director-model",
+  model: "empty-key-model",
 });
-cs.setActiveModelProfileId(accountA.id);
-profileClient = buildClientFromStore(cs, { profileId: isolatedDirector.id });
-check("角色 profile 空 Key 不回退 active Key", profileClient.apiKey, "");
+profileClient = buildClientFromStore(cs);
+check("当前配置空 Key 不回退旧 Key", profileClient.apiKey, "");
 check(
-  "角色 profile 的端点和模型保持隔离",
+  "当前配置的端点和模型保持隔离",
   [profileClient.endpoint, profileClient.model],
-  ["https://director.example.com/v1/chat/completions", "director-model"]
+  ["https://empty.example.com/v1/chat/completions", "empty-key-model"]
 );
 
 // ---- mock server ----

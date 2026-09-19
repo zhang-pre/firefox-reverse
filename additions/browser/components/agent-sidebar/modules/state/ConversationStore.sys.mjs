@@ -49,7 +49,7 @@ function normalizeThread(t) {
   return {
     ...t,
     workspace: t.workspace || null,
-    mode: t.mode || null,
+    mode: t.mode === "auto" || t.mode === "assist" ? t.mode : null,
     envId: t.envId || null,
     modelStrategy: t.modelStrategy === "premium" ? "premium" : "balanced",
     lastTurnStatus: TURN_STATUSES.has(t.lastTurnStatus) ? t.lastTurnStatus : "idle",
@@ -195,7 +195,7 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       workspace: workspace || null,
-      mode: mode || null, // auto=全自动 / assist=用户领航 / supervised=双模型领航 / null=未选
+      mode: ["auto", "assist"].includes(mode) ? mode : null,
       envId: null,
       modelStrategy: "balanced",
       lastTurnStatus: "idle",
@@ -222,12 +222,12 @@ export class ConversationStore {
     return t;
   }
 
-  /** 设置/更新会话执行模式（auto / assist / supervised）。按会话持久化。 */
+  /** 设置/更新会话执行模式（auto / assist）。按会话持久化。 */
   async setThreadMode(id, mode) {
     const d = await this._load();
     const t = d.threads.find(x => x.id === id);
     if (t) {
-      t.mode = ["auto", "assist", "supervised"].includes(mode) ? mode : null;
+      t.mode = ["auto", "assist"].includes(mode) ? mode : null;
       t.updatedAt = nextTs();
       await this._save();
     }
@@ -446,7 +446,7 @@ export class ConversationStore {
       createdAt: now,
       updatedAt: now,
       workspace: null,
-      mode: ["assist", "auto", "supervised"].includes(src.mode)
+      mode: ["assist", "auto"].includes(src.mode)
         ? src.mode
         : null,
       envId: null,
