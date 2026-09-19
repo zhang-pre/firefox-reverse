@@ -6,10 +6,10 @@
 |---|---|---|
 | `runtime/` | 平台无关运行时、状态内核、Ports、执行循环与应用编排 | AgentRuntime、AgentTurnOrchestrator、AgentLoop |
 | `llm/` | 模型请求、协议转换、SSE、重试、Transport、思考等级和 Usage | LlmClient |
-| `providers/` | Provider 元数据、模型配置、Client 构造 | providers、ConfigStore |
+| `providers/` | Provider 元数据、模型配置、Client 构造与侧栏字号偏好 | providers、ConfigStore、SidebarTypography |
 | `state/` | 会话持久化、跨 Turn 投影、Turn 内上下文压缩与裁剪 | ConversationStore、ContextProjection、TurnContext |
 | `tools/` | 工具声明、注册和派发 | Tools、ToolRouter |
-| `backends/` | Firefox/本机能力实现、Actor、工作目录、记忆、Skills 和环境管理 | Backends、PageBackend、AgentEvalChild |
+| `backends/` | Firefox/本机能力实现、Actor、工作目录、记忆、Skills、环境管理及原生指纹策略 | Backends、PageBackend、NativeFingerprintPolicy |
 | `host/` | Firefox 特权适配和进程级 Runtime 装配 | AgentSession、FirefoxAgentRuntimeHost |
 
 ## 源码路径与安装路径

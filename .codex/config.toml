@@ -1,0 +1,19 @@
+[mcp_servers.frx-director]
+command = "/home/zbb/.nvm/versions/node/v24.20.0/bin/node"
+args = ["/home/zbb/projects/frx-director-mcp/dist/index.js"]
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+enabled = true
+
+[mcp_servers.frx-director.env]
+FRX_MARIONETTE_HOST = "127.0.0.1"
+FRX_MARIONETTE_PORT = "2828"
+FRX_PORT_WAIT_SEC = "90"
+FRX_AUTOLAUNCH = "0"
+FRX_FIREFOX_BIN = "/home/zbb/projects/firefox-reverse/upstream/obj-x86_64-pc-linux-gnu/dist/bin/firefox"
+FRX_JSX_PROMPT_SRC = "/home/zbb/projects/firefox-reverse/additions/browser/components/agent-sidebar/content/AgentPanel.jsx"
+FRX_WORKSPACE_ROOT = "/home/zbb/projects/firefox-reverse-ws"
+FRX_DATA_DIR = "/home/zbb/projects/frx-director-mcp/data"
+
+[mcp_servers.frx-director.tools.frx_status]
+approval_mode = "approve"

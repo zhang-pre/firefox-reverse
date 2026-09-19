@@ -9,13 +9,16 @@ patches/agent-ui/         ← 改 upstream，注册 sidebar 入口 + 把 additio
 additions/.../agent-sidebar/  ← 提供 React/ESM 源文件（不改 upstream）
 ```
 
-## 计划补丁清单（均 ⬜ 待写，依赖 upstream bootstrap）
+## 补丁清单
 
 | 补丁 | 作用 | 状态 |
 |---|---|---|
-| `0001-add-sidebar-entry.patch` | 注册 "Agent" 侧栏入口 | ⬜ 待调研 153 真实点位 |
-| `0002-agent-panel-host.patch` | sidebar 容器承载 React 面板 | ⬜ |
-| `0003-package-into-omni.patch` | 把 agent-sidebar 资源打进 omni.ja | ⬜ |
+| `0001-register-agent-sidebar.patch` | 注册 Agent 侧栏和资源 | 已实现 |
+| `0002-keep-sidebar-launcher-at-top.patch` | 保持入口位于侧栏顶部 | 已实现 |
+| `0003-package-locale-default.patch` | 打包默认语言配置 | 已实现 |
+| `0004-settle-extension-startup-on-quit.patch` | Firefox 过早退出时结束隐藏扩展窗口的初始化等待 | 已移植，待真实浏览器验证 |
+
+`0004` 移植 Mozilla [4cf4f28e](https://github.com/mozilla-firefox/firefox/commit/4cf4f28e4a29a167957dd021a4d7227d952d0078) 对 [Bug 2051934](https://bugzilla.mozilla.org/show_bug.cgi?id=2051934) 的修复。可用 `node scripts/tests/extension-shutdown.mjs /path/to/patched-gecko` 执行类级回归测试；真实 Firefox 启动和退出仍需单独验证。
 
 ## 风险与技术备注（侦察阶段留痕，落地前必读）
 

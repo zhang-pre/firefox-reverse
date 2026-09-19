@@ -12,6 +12,7 @@ EXTRA_JS_MODULES.agentsidebar.backends += [
     "modules/backends/EnvironmentBackendCurrent.sys.mjs",
     "modules/backends/JsvmpBackend.sys.mjs",
     "modules/backends/LedgerBackend.sys.mjs",
+    "modules/backends/NativeFingerprintPolicy.sys.mjs",
     "modules/backends/NetworkBackend.sys.mjs",
     "modules/backends/NotesBackend.sys.mjs",
     "modules/backends/PageBackend.sys.mjs",
@@ -39,6 +40,7 @@ EXTRA_JS_MODULES.agentsidebar.llm += [
 EXTRA_JS_MODULES.agentsidebar.providers += [
     "modules/providers/ConfigStore.sys.mjs",
     "modules/providers/providers.sys.mjs",
+    "modules/providers/SidebarTypography.sys.mjs",
 ]
 
 EXTRA_JS_MODULES.agentsidebar.runtime += [
