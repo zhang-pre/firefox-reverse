@@ -119,4 +119,31 @@ assert.deepEqual(combinedTools[0], ["evidence_read"]);
 assert.deepEqual(combinedTools[2], ["run_node", "run_python"]);
 assert.equal(review.decision.evidenceReads.length, 1);
 
-console.log("Stage gates: PASS (90-call budgets, raw evidence, P2 guards, combined P2/final acceptance)");
+const extraRef = { ...approval, p2Review: { ...approval.p2Review, evidenceRefs: ["tool:1:1", "tool:2:0"] } };
+const badParsed = parseDirectorDecision(JSON.stringify(extraRef), readPacket);
+assert.match(badParsed.reason, /tool:2:0.*未在本次审阅实际读取/);
+assert.equal(badParsed.nextPhase, "DISCOVERY");
+assert.ok(!badParsed.guidance.includes("提交 P2 checkpoint"));
+async function repairReview(lastResponse, truncated = false) {
+  const replies = [
+    { toolCalls: [call("read", "evidence_read", { evidenceId: "tool:1:1" })] },
+    ...(truncated ? [{ content: "", finishReason: "length" }] : []),
+    { content: JSON.stringify(extraRef) }, { content: JSON.stringify(lastResponse) },
+  ];
+  const requests = [];
+  const result = await new AgentSupervisor().review({ packet, readEvidence,
+    client: { async chat(messages) { requests.push(structuredClone(messages)); return replies.shift(); } } });
+  assert.match(requests.at(-1).at(-1).content, /tool:2:0.*未在本次审阅实际读取/);
+  return { ...result, requests };
+}
+let repaired = await repairReview(approval, true);
+assert.equal(repaired.decision.p2Approved, true, "citation repair remains available after truncation recovery");
+assert.equal(repaired.decision.evidenceReads.length, 1, "reuse already-read evidence");
+assert.equal(repaired.requests.length, 4);
+repaired = await repairReview({ action: "continue", nextStage: "DISCOVERY", reason: "已读证据不足", guidance: "补一组真实输入输出", requiredEvidence: ["真实输入输出"] });
+assert.equal(repaired.decision.p2Approved, false);
+assert.equal(repaired.decision.action, "continue", "genuine evidence gap returns to Worker");
+repaired = await repairReview(extraRef);
+assert.equal(repaired.decision.action, "review_error", "repeated invalid approval cannot ask Worker to resubmit");
+assert.match(repaired.decision.reason, /tool:2:0/);
+console.log("Stage gates: PASS (budgets, P2 guards, combined acceptance, same-review citation correction)");

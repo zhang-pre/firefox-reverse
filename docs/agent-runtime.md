@@ -211,6 +211,14 @@ evidence is preserved in a fallback report. The task is visibly incomplete and
 uses the existing `failed` turn status rather than marking acceptance successful.
 
 Review protocol failures are not artifact rejections. Director starts with a
+bounded P2 contract check: every approval reference must be selected and actually
+read as reviewable in this review. Missing, unread and ineligible IDs are reported
+explicitly, and contradictory approval wording is replaced by Runtime's rejection.
+A single P2 contract correction is allowed within the same review, independently
+of truncation/JSON recovery, reusing existing evidence receipts and read budgets.
+Director must either justify approval using eligible evidence or return a genuine
+discovery supplement request; persistent contract failure pauses as review_error,
+without asking Worker to resubmit an identical checkpoint. Director starts with a
 4,096-token response budget, with at most one format/truncation recovery on the
 same evidence. Truncation raises the retry budget to 8,192; truncated tool calls
 are not executed. Persistent invalid output, request failure, or exhausted review

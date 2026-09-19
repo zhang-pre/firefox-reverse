@@ -548,7 +548,7 @@ const p2Rejected = makeHarness({
   directorDecisions: Array.from({ length: 4 }, () => ({ action: "continue", nextStage: "IMPLEMENTATION", reason: "相信 Worker 结论" })),
 });
 await p2Rejected.orchestrator.run("p2-rejected", { supervised: true, workspaceRoot: "/work" });
-check("summary-only P2 approval never transitions and stops after three rejections", p2Rejected.calls.length === 3 && p2Rejected.calls.every(c => c.stageGate.stage === "DISCOVERY") && p2Rejected.summaryCalls.length === 1);
+check("invalid P2 contract is corrected within review then pauses without Worker replay", p2Rejected.calls.length === 1 && p2Rejected.directorCalls.length === 2 && p2Rejected.calls.every(c => c.stageGate.stage === "DISCOVERY") && p2Rejected.summaryCalls.length === 0 && p2Rejected.core.getState("p2-rejected").steps.some(s => s.action === "review_error"));
 
 const budgetOnly = makeHarness({
   turns: [blockedTurn(), { result: { content: "round limit", stopReason: "max_rounds", messages: [{ role: "tool", content: "preserved evidence" }], toolCalls: [{ name: "page_eval", env: { ok: true } }] } }, blockedTurn(), blockedTurn()],

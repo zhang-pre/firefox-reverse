@@ -62,6 +62,7 @@ Runtime 的 stage 为 DISCOVERY 时禁止 finish 或跳过 P2。Worker 的 verif
 P2 只审批候选入口、关键输入输出与下一步路线，不要求已完成独立算法或真实接口成功；这些属于最终验收。不要把普通实现细节升级为新阶段门。
 pendingFinal=true 表示最终产物已提交但遗漏 P2：先读取现有证据并返回 P2 审批 JSON。Runtime 会在同一审阅中开放最终执行工具，无需让 Worker 重做探索。
 P2 审查必须调用 evidence_read 按 ID 阅读原始工具记录（每次审阅最多 2 次，可按 offset 分页），不获得任意文件或代码执行权限。
+p2Review.evidenceRefs 是批准依据，只能引用本次实际读取、reviewable=true 且属于 checkpoint.evidenceRefs 的记录。证据包摘要中出现的 ID 不等于已读；未读记录只能作为待核实背景，不得列入批准依据。已读证据不足就保持 DISCOVERY 并给出最小补证要求，不要为了通过校验机械删除关键依据。
 只有 checkpoint.phase=P2 且你实际读过并引用其中证据，才能 nextStage=IMPLEMENTATION。必须填写 p2Review 的 entry、inputs、outputScope、stateAndEncoding、limitations：入口、真实入参、比对覆盖到中间值还是最终 wire、随机/初始化状态和编码、未验证边界。
 局部 RSA 运算相同不等于随机填充或最终参数正确；HTTP 风控文案不证明环境风控。审批有证据支持的入口与下一步路线，不是宣布整个算法正确；不足则留在 DISCOVERY，给出最小补证实验。
 segment_budget 只是正常交接，不代表失败。路线切换可 nextStage=DISCOVERY 回退并重审 P2。
@@ -397,14 +398,24 @@ export function parseDirectorDecision(text, packet = {}) {
   let p2Approved = false;
   const reads = packet.evidenceReads || [];
   const p2 = parsed.p2Review || {};
+  const validationErrors = [];
   if (packet.stage === "DISCOVERY" && parsed.nextStage === "IMPLEMENTATION") {
     const selected = new Set(packet.checkpoint?.evidenceRefs || []);
-    p2Approved = ["continue", "redirect"].includes(action) && parsed.blocked !== true && packet.checkpoint?.phase === "P2" &&
-      ["entry", "inputs", "outputScope", "stateAndEncoding", "limitations"].every(k => typeof p2[k] === "string" && p2[k].trim()) &&
-      Array.isArray(p2.evidenceRefs) && p2.evidenceRefs.length > 0 &&
-      p2.evidenceRefs.every(id => selected.has(id) && reads.some(r => r.ok && r.reviewable && r.evidenceId === id));
+    if (!["continue", "redirect"].includes(action) || parsed.blocked === true) validationErrors.push("审批迁移要求 continue/redirect 且 blocked=false");
+    if (packet.checkpoint?.phase !== "P2") validationErrors.push("缺少 P2 checkpoint");
+    for (const key of ["entry", "inputs", "outputScope", "stateAndEncoding", "limitations"]) {
+      if (typeof p2[key] !== "string" || !p2[key].trim()) validationErrors.push(`p2Review.${key} 不能为空`);
+    }
+    if (!Array.isArray(p2.evidenceRefs) || !p2.evidenceRefs.length) validationErrors.push("缺少 P2 批准证据引用");
+    else for (const id of p2.evidenceRefs) {
+      if (!selected.has(id)) validationErrors.push(`引用 ${id} 不属于当前 checkpoint`);
+      const matching = reads.filter(r => r.evidenceId === id && r.ok);
+      if (!matching.length) validationErrors.push(`引用 ${id} 未在本次审阅实际读取`);
+      else if (!matching.some(r => r.reviewable)) validationErrors.push(`引用 ${id} 不可作为批准依据（失败、超时、截断或非验证记录）`);
+    }
+    p2Approved = validationErrors.length === 0;
     if (p2Approved) nextStage = "IMPLEMENTATION";
-    else guidance = "P2 未获准迁移：提交 P2 checkpoint，Director 读取原始证据并审查入口、输入、输出覆盖范围、状态与编码。 " + guidance;
+    else guidance = `Runtime 未批准 P2：${validationErrors.join("；")}。需由 Director 在本次审阅内修正决策，而非让 Worker 重交相同 checkpoint。`;
   } else if (packet.stage && parsed.nextStage === "DISCOVERY" && ["continue", "redirect"].includes(action)) {
     nextStage = "DISCOVERY";
   }
@@ -439,9 +450,10 @@ export function parseDirectorDecision(text, packet = {}) {
   return {
     action,
     requestedAction: parsed.action,
-    reason: action !== parsed.action ? parsed.reason : reason,
+    reason: validationErrors.length ? `Director 建议迁移，但 Runtime 校验未通过：${validationErrors.join("；")}` : action !== parsed.action ? parsed.reason : reason,
     guidance,
-    nextPhase: clip(parsed.nextPhase, 160).trim(),
+    nextPhase: validationErrors.length ? "DISCOVERY" : clip(parsed.nextPhase, 160).trim(),
+    validationErrors,
     requiredEvidence: Array.isArray(parsed.requiredEvidence)
       ? parsed.requiredEvidence.map(item => clip(item, 500)).slice(0, 20)
       : [],
@@ -522,6 +534,7 @@ export class AgentSupervisor {
     let attempts = 0;
     let readAttempts = 0;
     let parseFailures = 0;
+    let contractFailures = 0;
     let responseBudget = 4096;
     let p2Decision = null;
     const diagnostics = [];
@@ -615,6 +628,12 @@ export class AgentSupervisor {
       }
       try {
         let decision = parseDirectorDecision(response?.content, packet);
+        if (decision.validationErrors.length) {
+          diagnostics[diagnostics.length - 1].validationErrors = decision.validationErrors;
+          const error = new Error(decision.validationErrors.join("；"));
+          error.p2Contract = true;
+          throw error;
+        }
         if (packet.pendingFinal && packet.stage === "DISCOVERY" && decision.p2Approved) {
           p2Decision = decision;
           packet.stage = "ACCEPTANCE";
@@ -634,13 +653,13 @@ export class AgentSupervisor {
         };
       } catch (error) {
         lastError = error;
-        if (++parseFailures >= 2) break;
+        if (error.p2Contract ? ++contractFailures >= 2 : ++parseFailures >= 2) break;
         if (turn < 8) {
           messages.push({ role: "assistant", content: response?.content || "",
             ...(response?.reasoningContent ? { reasoning_content: response.reasoningContent } : {}) });
           messages.push({
             role: "user",
-            content: `输出不符合契约：${error.message}。请只返回符合既定字段的 JSON 对象。`,
+            content: `输出不符合契约：${error.message}。请在同一次审阅内修正，不让 Worker 重交相同材料。当前可作为 P2 批准依据的已读 ID：${JSON.stringify(packet.evidenceReads.filter(r => r.ok && r.reviewable && packet.checkpoint?.evidenceRefs?.includes(r.evidenceId)).map(r => r.evidenceId))}。只根据这些证据重新判断；不足则保持 DISCOVERY 并给出最小补证要求，不要机械删引用后批准。请只返回符合既定字段的 JSON 对象。`,
           });
         }
       }
